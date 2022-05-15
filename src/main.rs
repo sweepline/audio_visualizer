@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{num::NonZeroU32, time::Instant};
 
 use std::iter;
 
@@ -10,6 +10,7 @@ use winit::{
 };
 
 mod camera;
+mod fft_buffer;
 mod texture;
 
 #[repr(C)]
@@ -35,11 +36,13 @@ impl Vertex {
             array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
+                // Position
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
                     format: wgpu::VertexFormat::Float32x3,
                 },
+                // Texture coordinates
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
@@ -76,21 +79,27 @@ struct State {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+
     size: winit::dpi::PhysicalSize<u32>,
     time: Instant,
     util_buffer: wgpu::Buffer,
     util_bind_group: wgpu::BindGroup,
+
     camera: camera::Camera,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: camera::CameraController,
+
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    #[allow(dead_code)]
+
     diffuse_texture: texture::Texture,
     diffuse_bind_group: wgpu::BindGroup,
+
+    fft_buffer: fft_buffer::FFTBuffer,
+    fft_bind_group: wgpu::BindGroup,
 }
 
 impl State {
@@ -116,7 +125,13 @@ impl State {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     features: wgpu::Features::empty(),
-                    limits: wgpu::Limits::default(),
+                    // WebGL doesn't support all of wgpu's features, so if
+                    // we're building for the web we'll have to disable some.
+                    limits: if cfg!(target_arch = "wasm32") {
+                        wgpu::Limits::downlevel_webgl2_defaults()
+                    } else {
+                        wgpu::Limits::default()
+                    },
                 },
                 None, // Trace path
             )
@@ -132,6 +147,47 @@ impl State {
         };
         surface.configure(&device, &config);
 
+        let fft_buffer =
+            fft_buffer::FFTBuffer::from_buffer(&device, &queue, 10, "fft_buffer").unwrap();
+
+        let fft_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+                label: Some("fft_bind_group_layout"),
+            });
+
+        let fft_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &fft_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&fft_buffer.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&fft_buffer.sampler),
+                },
+            ],
+            label: Some("fft_bind_group"),
+        });
+
         let diffuse_bytes = include_bytes!("happy-tree.png");
         let diffuse_texture =
             texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
@@ -145,17 +201,14 @@ impl State {
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler {
-                            comparison: false,
-                            filtering: true,
-                        },
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                         count: None,
                     },
                 ],
@@ -199,7 +252,6 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -238,7 +290,6 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-
         let util_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -265,7 +316,7 @@ impl State {
 
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("st101.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
         let render_pipeline_layout =
@@ -275,6 +326,7 @@ impl State {
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
                     &util_bind_group_layout,
+                    &fft_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -307,7 +359,7 @@ impl State {
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLAMPING
-                clamp_depth: false,
+                unclipped_depth: false,
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
@@ -317,6 +369,7 @@ impl State {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
+            multiview: None,
         });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -347,6 +400,8 @@ impl State {
             num_indices,
             diffuse_texture,
             diffuse_bind_group,
+            fft_buffer,
+            fft_bind_group,
             time,
             util_buffer,
             util_bind_group,
@@ -359,6 +414,8 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+
+            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
         }
     }
 
@@ -378,18 +435,33 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera.build_view_projection_matrix()]),
         );
-        println!(
-            "{:?}",
-            glam::vec2(self.config.width as f32, self.config.height as f32)
-        );
         let x = [UtilUniform {
             time: self.get_elapsed_time(),
             res_width: self.size.width as f32,
             res_height: self.size.height as f32,
         }];
         let data: &[u8] = bytemuck::cast_slice(&x);
-        println!("{:?}", data);
         self.queue.write_buffer(&self.util_buffer, 0, data);
+
+        let fft = &mut self.fft_buffer;
+        for e in &mut fft.buffer {
+            *e = (*e + 1.0) % 100.0;
+        }
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                aspect: wgpu::TextureAspect::All,
+                texture: &fft.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            &fft_buffer::to_byte_slice(&fft.buffer),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: NonZeroU32::new(4 * fft.size.width),
+                rows_per_image: NonZeroU32::new(fft.size.height),
+            },
+            fft.size,
+        );
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -411,12 +483,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Load,
                         store: true,
                     },
                 }],
@@ -424,9 +491,10 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_bind_group(2, &self.util_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.fft_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.util_bind_group, &[]);
+            render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);

@@ -1,46 +1,47 @@
 use std::num::NonZeroU32;
 
 use anyhow::*;
-use image::GenericImageView;
 
-pub struct Texture {
+pub fn to_byte_slice<'a>(floats: &'a [f32]) -> &'a [u8] {
+    unsafe { std::slice::from_raw_parts(floats.as_ptr() as *const _, floats.len() * 4) }
+}
+
+pub struct FFTBuffer {
+    pub buffer: Vec<f32>,
+    pub size: wgpu::Extent3d,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
 
-impl Texture {
-    pub fn from_bytes(
+impl FFTBuffer {
+    pub fn from_buffer(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bytes: &[u8],
+        buf_len: u32,
         label: &str,
     ) -> Result<Self> {
-        let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
-    }
-
-    pub fn from_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        img: &image::DynamicImage,
-        label: Option<&str>,
-    ) -> Result<Self> {
-        let rgba = img.as_rgba8().unwrap();
-        let dimensions = img.dimensions();
+        let dimensions = (buf_len, 2);
 
         let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
+
+        let buf: Vec<f32> = vec![
+            0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 50.0, 50.0, 50.0, 50.0,
+            50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
+        ];
+        let buf_data = to_byte_slice(&buf);
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
+            label: Some(label),
             size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::R32Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         });
 
@@ -51,7 +52,7 @@ impl Texture {
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            rgba,
+            &buf_data,
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: NonZeroU32::new(4 * dimensions.0),
@@ -72,6 +73,8 @@ impl Texture {
         });
 
         Ok(Self {
+            buffer: buf,
+            size,
             texture,
             view,
             sampler,
