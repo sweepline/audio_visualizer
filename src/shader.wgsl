@@ -60,6 +60,6 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 	var fft_dimensions = vec2<f32>(textureDimensions(fft_buffer));
 	var fft_index = vec2<f32>(0.0, 0.0) / fft_dimensions;
     var fft_sample = textureSample(fft_buffer, fft_sampler, fft_index).r / 100.0;
-	//return textureSample(fft_buffer, fft_sampler, in.tex_coords);
-    return vec4<f32>(fft_sample, fft_sample, fft_sample, 1.0);
+	return textureSample(fft_buffer, fft_sampler, in.tex_coords) / 100.0;
+    //return vec4<f32>(fft_sample, fft_sample, fft_sample, 1.0);
 }
