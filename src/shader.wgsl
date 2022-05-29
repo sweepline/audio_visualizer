@@ -48,6 +48,11 @@ var fft_buffer: texture_2d<f32>;
 [[group(0), binding(1)]]
 var fft_sampler: sampler;
 
+let BAR_COLOR = vec3<f32>(0.8, 0.2, 0.3);
+let BAR_WIDTH = 0.75;
+let PI = 3.14159265359;
+
+
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 	// Texture coords have 0,0 in top left and 1,1 in bottom right
@@ -59,7 +64,17 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     var tex_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
 	var fft_dimensions = vec2<f32>(textureDimensions(fft_buffer));
 	var fft_index = vec2<f32>(0.0, 0.0) / fft_dimensions;
-    var fft_sample = textureSample(fft_buffer, fft_sampler, fft_index).r / 100.0;
-	return textureSample(fft_buffer, fft_sampler, in.tex_coords) / 100.0;
+    //var fft_sample = textureSample(fft_buffer, fft_sampler, fft_index).r / 100.0;
+    var fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(uv.x, 0.0)).r / 400.0;
+	var col = vec3<f32>(fft_sample, 4.0*fft_sample*(1.0-fft_sample), 1.0-fft_sample ) * fft_sample;
+
+	var horizontal = smoothStep(1.0 - BAR_WIDTH, 1.0 - BAR_WIDTH, abs(sin(uv.x * PI * fft_dimensions.x)));
+	var vertical = smoothStep(1.0 - fft_sample, 1.0 - fft_sample, 1.0 - uv.y);
+
+	// Output to screen
+	var col2 = vec3<f32>(BAR_COLOR * horizontal * vertical);
+
+	//return textureSample(fft_buffer, fft_sampler, in.tex_coords) / 100.0;
     //return vec4<f32>(fft_sample, fft_sample, fft_sample, 1.0);
+	return vec4<f32>(col2, 1.0);
 }

@@ -1,5 +1,9 @@
 # Notes
 
+I dont understand the holes in the logarithmic scale. They are in the linear one too, i think its the buckets being smaller than the FFT Bins?
+Amplitude needs to be made linear?
+Maybe let the values fade over time instead of replacing to accenuate small time notes more.
+
 Maybe use storage buffers or dynamic uniforms for fft data, as the data should be pretty small.
 
 ```rust

@@ -29,10 +29,7 @@ impl FFTBuffer {
             depth_or_array_layers: 1,
         };
 
-        let buf: Vec<f32> = vec![
-            0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 50.0, 50.0, 50.0, 50.0,
-            50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
-        ];
+        let buf: Vec<f32> = vec![0.0; (buf_len * 2) as usize];
         let buf_data = to_byte_slice(&buf);
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
