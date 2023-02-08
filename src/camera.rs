@@ -1,4 +1,4 @@
-use winit::event::{WindowEvent, KeyboardInput, ElementState, VirtualKeyCode};
+use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -24,7 +24,6 @@ impl Camera {
         return proj * view;
     }
 }
-
 
 pub struct CameraController {
     speed: f32,
@@ -52,11 +51,12 @@ impl CameraController {
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
-                input: KeyboardInput {
-                    state,
-                    virtual_keycode: Some(keycode),
-                    ..
-                },
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(keycode),
+                        ..
+                    },
                 ..
             } => {
                 let is_pressed = *state == ElementState::Pressed;
@@ -113,8 +113,8 @@ impl CameraController {
         let forward_mag = forward.length();
 
         if self.is_right_pressed {
-            // Rescale the distance between the target and eye so 
-            // that it doesn't change. The eye therefore still 
+            // Rescale the distance between the target and eye so
+            // that it doesn't change. The eye therefore still
             // lies on the circle made by the target and eye.
             camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
         }
@@ -124,6 +124,3 @@ impl CameraController {
     }
 }
 
- 
-
- 

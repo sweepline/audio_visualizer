@@ -1,9 +1,12 @@
 use anyhow::Error;
 use core::f32::consts::PI;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    BufferSize, FrameCount, SampleFormat, SupportedBufferSize,
+};
 use ringbuf::RingBuffer;
-use rustfft::{algorithm::Radix4, num_complex::Complex32, Fft, FftDirection, FftPlanner};
-use std::time::{Instant, SystemTime};
+use rustfft::{num_complex::Complex32, FftPlanner};
+use std::time::Instant;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -15,6 +18,7 @@ mod fft_buffer;
 mod state;
 mod texture;
 
+pub const FRAME_DELAY: f32 = 16.66; // ms (16.666 is 60 fps)
 pub const BUCKETS: usize = 20;
 
 pub fn hann_window(samples: &mut [f32]) -> Result<(), Error> {
@@ -40,42 +44,66 @@ pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    println!("WOW");
     let event_loop = EventLoop::new();
+    println!("WOW");
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     // FFT STUFF MOVE INTO STRUCT FOR STATE.
     // ALSO MAKE RENDER STATE AND PROGRAM STATE SEPERATE.
     let host = cpal::default_host();
     let device = host.default_input_device().unwrap();
+    println!("WOW");
+
     let mut config = device
         .default_input_config()
         .expect("Failed to get default input config")
         .config();
+    let sample_rate = config.sample_rate.0 as f32;
+
+    // let measure_duration = BLOCK_LENGTH as f32 * bandwidth;
+    // let freq_resolution = sample_rate / BLOCK_LENGTH as f32;
+    let supported = device.default_input_config().unwrap();
+
+    // TODO: Somethingsfucky about the buffersize
+    let data_size = supported.sample_format().sample_size();
+    let sr_ms = sample_rate / 1_000.0;
+    let samples_per_frame_f = (sr_ms * FRAME_DELAY);
+    println!("{:?}, {:?}, {:?}", sr_ms, FRAME_DELAY, data_size);
+    let buffer_size = samples_per_frame_f * data_size as f32;
+    println!("DESIRED BUFFER SIZE: {:?}", buffer_size);
+    let actual_size = f32::powf(2.0, f32::ceil(f32::log2(buffer_size)) - 1.0) as u32;
+    println!("ACTUAL BUFFER SIZE: {:?}", actual_size);
+    let block_length = actual_size / data_size as u32;
+    println!("BLOCK_LENGTH: {:?}", block_length);
+
+    let bz = if let SupportedBufferSize::Range { .. } = supported.buffer_size() {
+        BufferSize::Fixed(actual_size)
+    } else {
+        BufferSize::Default
+    };
     // TODO: 2 Channels, the data will be interleaved [L, R, L, R]
     config.channels = 1;
+    config.buffer_size = bz;
+    // config.buffer_size = BufferSize::Fixed(FrameCount)
     let channels = config.channels as usize;
-    let sample_rate = config.sample_rate.0 as f32;
 
     println!("NAME: {:?}", device.name());
     println!("SIZE: {:?}", config.buffer_size);
     println!("RATE: {:?}", sample_rate);
+    println!(
+        "SAMPLE_FORMAT: {:?}",
+        supported.sample_format().sample_size()
+    );
     println!("CHANNELS: {:?}", config.channels);
 
-    // Create a delay in case the input and output devices aren't synced.
-    let latency = 80.0; // ms
-    let latency_frames = (latency / 1_000.0) * sample_rate;
-    let latency_samples = latency_frames as usize * channels;
-    println!(
-        "LATENCY: {:?}, LATENCY_FRAMES: {:?}, LATENCY_SAMPLES: {:?}",
-        latency, latency_frames, latency_samples
-    );
-
-    // The buffer to share samples
-    let ring = RingBuffer::<f32>::new(latency_samples * 2);
+    let samples_per_frame = samples_per_frame_f as usize;
+    // The buffer to share samples make it twice the needed length
+    let ring = RingBuffer::<f32>::new(samples_per_frame * 4);
     let (mut producer, mut consumer) = ring.split();
 
     // Fill the samples with 0.0 equal to the length of the delay.
-    for _ in 0..latency_samples {
+    for _ in 0..samples_per_frame {
         // The ring buffer has twice as much space as necessary to add latency here,
         // so this should never fail
         producer.push(0.0).unwrap();
@@ -148,19 +176,19 @@ async fn main() {
             Event::RedrawRequested(_) => {
                 // START FFT
                 let elapsed = now2.elapsed().as_micros();
-                const FFT_SAMPLING_RATE: u128 = 200 * 1000;
-
+                let fft_sample_delay = FRAME_DELAY * 1000.0;
                 let mut bucketed_opt: Option<Vec<f32>> = None;
-                // Try to run the FFT for the frequency response every 30 ms.
-                if elapsed > FFT_SAMPLING_RATE {
-                    let frame_samples = elapsed as f32 * sample_rate / 1_000_000.0;
-                    let fft_samples = frame_samples as usize * channels;
+                if elapsed > fft_sample_delay as u128 {
+                    // TODO: do something about time drift (fix your timestep).
+                    now2 = Instant::now();
+                    // Time elapsed in microseconds * samples per microseconds
+                    let exact_samples = elapsed as f32 * (sample_rate / 1_000_000.0);
+                    let fft_samples = exact_samples as usize * channels;
                     // println!(
                     //     "consuming {:?} samples, for {:?} ms",
                     //     fft_samples,
                     //     elapsed / 1_000
                     // );
-                    now2 = Instant::now();
 
                     let mut input_fell_behind = false;
                     let mut fft_buf: Vec<Complex32> = Vec::new();
@@ -181,16 +209,19 @@ async fn main() {
                     // TODO: Probably bad to run this before every process.
                     let fft = planner.plan_fft_forward(fft_samples);
 
+                    // TODO: optimize this call
                     fft.process(&mut fft_buf);
 
-                    let freq_range = (15.0, 2000.0);
+                    let freq_range = (100., 8000.0);
+                    let bucket_range = (100., 7000.0);
                     let mut bucketed: Vec<f32> = vec![0.0; BUCKETS];
-                    println!(
-                        "bin size: {:?}, buckets: {}",
-                        sample_rate / fft_samples as f32,
-                        bucketed.len()
-                    );
+                    // println!(
+                    //     "bin size: {:?}, buckets: {}",
+                    //     sample_rate / fft_samples as f32,
+                    //     bucketed.len()
+                    // );
 
+                    // Something about getting half the samples as you put in.
                     let freq_amp: Vec<(f32, f32)> = fft_buf
                         .into_iter()
                         .take(fft_samples / 2)
@@ -202,31 +233,35 @@ async fn main() {
                         .filter(|(freq, _)| freq > &freq_range.0 && freq < &freq_range.1)
                         .collect();
 
-                    let freq_range_log = (f32::log10(freq_range.0), f32::log10(freq_range.1));
-                    let freq_to_bucket_log = |&freq| {
-                        let scaled_01 = (f32::log10(freq) - freq_range_log.0)
-                            / (freq_range_log.1 - freq_range_log.0);
-                        let scaled_buckets = scaled_01 * BUCKETS as f32;
-                        scaled_buckets as usize
+                    // bin = floor(N * (log(x) - log(min)) / (log(max) - log(min)))
+                    let freq_to_bucket_log = |&freq: &f32| {
+                        let i = f32::floor(
+                            BUCKETS as f32 * (f32::log10(freq) - f32::log10(bucket_range.0))
+                                / (f32::log10(bucket_range.1) - f32::log10(bucket_range.0)),
+                        );
+                        let i = i.clamp(0.0, BUCKETS as f32 - 1.0);
+                        i as usize
                     };
-                    let freq_to_bucket_lin = |&freq| {
-                        let scaled_01 = (freq - freq_range.0) / (freq_range.1 - freq_range.0);
-                        let scaled_buckets = scaled_01 * BUCKETS as f32;
-                        scaled_buckets as usize
-                    };
+
                     for (freq, amp) in &freq_amp {
-                        // let bucket_index = freq_to_bucket_log(freq);
-                        let bucket_index = freq_to_bucket_lin(freq);
-                        bucketed[bucket_index] += amp;
+                        // How we assign frequency on the x axis
+                        let bucket_index = freq_to_bucket_log(freq);
+                        // How we assign frequency on the y axis.
+                        let amp_log = f32::max(f32::log10(*amp), 0.0);
+                        bucketed[bucket_index] += amp_log;
                     }
 
-                    // println!("{:#?}", bucketed);
+                    println!("{:#?}", bucketed);
                     let max_peak = freq_amp.iter().max_by_key(|&(_, c)| *c as u32);
+                    let min_peak = freq_amp.iter().min_by_key(|&(_, c)| *c as u32);
                     let min_freq = freq_amp.iter().min_by_key(|&(f, _)| *f as u32).unwrap();
                     let max_freq = freq_amp.iter().max_by_key(|&(f, _)| *f as u32).unwrap();
-                    println!("Min freq {}, max freq {}", min_freq.0, max_freq.0);
+                    // println!("Min freq {}, max freq {}", min_freq.0, max_freq.0);
                     if let Some((freq, amp)) = max_peak {
                         println!("Max peak was {}, with amplitude {}", freq, amp);
+                    }
+                    if let Some((freq, amp)) = min_peak {
+                        println!("Min peak was {}, with amplitude {}", freq, amp);
                     }
                     bucketed_opt = Some(bucketed);
                 }

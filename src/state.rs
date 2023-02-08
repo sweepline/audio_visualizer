@@ -143,7 +143,8 @@ impl State {
         surface.configure(&device, &config);
 
         let fft_buffer =
-            fft_buffer::FFTBuffer::from_buffer(&device, &queue, BUCKETS as u32, "fft_buffer").unwrap();
+            fft_buffer::FFTBuffer::from_buffer(&device, &queue, BUCKETS as u32, "fft_buffer")
+                .unwrap();
 
         let fft_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
