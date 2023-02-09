@@ -48,10 +48,10 @@ var fft_buffer: texture_2d<f32>;
 [[group(0), binding(1)]]
 var fft_sampler: sampler;
 
-let BAR_COLOR = vec3<f32>(0.8, 0.2, 0.3);
-let BAR_WIDTH = 0.75;
 let PI = 3.14159265359;
 
+let bands = 30.0;
+let segs = 40.0;
 
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
@@ -60,18 +60,29 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     var uv = in.tex_coords;
     uv.y = 1.0 - uv.y;
 
+   // quantize coordinates
+    var p = vec2<f32>(0.0);
+    p.x = floor(uv.x*bands)/bands;
+    p.y = floor(uv.y*segs)/segs;
+
+
     var tex_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
 	var fft_dimensions = vec2<f32>(textureDimensions(fft_buffer));
-    var fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(uv.x, 0.25)).r;
+    var fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(p.x, 0.25)).r;
 
-	// Bars
-	var horizontal = smoothStep(1.0 - BAR_WIDTH, 1.0 - BAR_WIDTH, abs(sin(uv.x * PI * fft_dimensions.x)));
-	var vertical = smoothStep(1.0 - fft_sample, 1.0 - fft_sample, 1.0 - uv.y);
-	var col2 = vec3<f32>(BAR_COLOR * horizontal * vertical);
+    // led color
+    var color = mix(vec3<f32>(0.0, 2.0, 0.0), vec3<f32>(2.0, 0.0, 0.0), sqrt(uv.y));
 
-	// Basic white output
-	var col = vec3<f32>(step(uv.y, fft_sample));
+    // mask for bar graph
+    var mask = select(1.0, 0.1, p.y > fft_sample);
 
-	col = pow(col, vec3<f32>(1.0/2.2));
-	return vec4<f32>(col, 1.0);
+    // led shape
+    var d = fract((uv - p) *vec2<f32>(bands, segs)) - 0.5;
+    var led = smoothStep(0.5, 0.35, abs(d.x)) * smoothStep(0.5, 0.35, abs(d.y));
+    var ledColor = led*color*mask;
+
+	var col = pow(ledColor, vec3<f32>(1.0/2.2));
+    var srgb = pow(ledColor, vec3<f32>(2.2));
+    // output final color
+    return vec4<f32>(srgb, 1.0);
 }

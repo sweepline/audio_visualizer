@@ -5,7 +5,7 @@ use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
-use crate::{camera, fft_buffer, texture, BUCKETS};
+use crate::{camera, fft_buffer, texture, TEXTURE_WIDTH};
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -143,7 +143,7 @@ impl State {
         surface.configure(&device, &config);
 
         let fft_buffer =
-            fft_buffer::FFTBuffer::from_buffer(&device, &queue, BUCKETS as u32, "fft_buffer")
+            fft_buffer::FFTBuffer::from_buffer(&device, &queue, TEXTURE_WIDTH, "fft_buffer")
                 .unwrap();
 
         let fft_bind_group_layout =
@@ -312,7 +312,7 @@ impl State {
 
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("led_shader.wgsl").into()),
         });
 
         let render_pipeline_layout =
@@ -424,7 +424,7 @@ impl State {
         self.time.elapsed().as_secs_f32()
     }
 
-    pub fn update(&mut self, fft_data: Option<&[f32]>) {
+    pub fn update(&mut self, fft_data: &[f32]) {
         self.camera_controller.update_camera(&mut self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -439,27 +439,25 @@ impl State {
         let data: &[u8] = bytemuck::cast_slice(&x);
         self.queue.write_buffer(&self.util_buffer, 0, data);
 
-        if let Some(fft_data) = fft_data {
-            let fft = &mut self.fft_buffer;
-            for (i, e) in fft_data.into_iter().enumerate() {
-                fft.buffer[i] = *e;
-            }
-            self.queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    aspect: wgpu::TextureAspect::All,
-                    texture: &fft.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                },
-                &fft_buffer::to_byte_slice(&fft.buffer),
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: NonZeroU32::new(4 * fft.size.width),
-                    rows_per_image: NonZeroU32::new(fft.size.height),
-                },
-                fft.size,
-            );
+        let fft = &mut self.fft_buffer;
+        for (i, e) in fft_data.into_iter().enumerate() {
+            fft.buffer[i] = *e;
         }
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                aspect: wgpu::TextureAspect::All,
+                texture: &fft.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            &fft_buffer::to_byte_slice(&fft.buffer),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: NonZeroU32::new(4 * fft.size.width),
+                rows_per_image: NonZeroU32::new(fft.size.height),
+            },
+            fft.size,
+        );
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
