@@ -22,8 +22,10 @@ mod fft_buffer;
 mod state;
 mod texture;
 
-pub const FFT_SIZE: usize = 1024; // 2^n
-pub const TEXTURE_WIDTH: usize = FFT_SIZE / 4; // 1/4 size of FFT_SIZE for 0-10kHz
+// Should be 2^n.
+pub const FFT_SIZE: usize = 1024;
+// 1/4 size of FFT_SIZE for 0-10kHz assuming a 44.1kHz Source.
+pub const TEXTURE_WIDTH: usize = FFT_SIZE / 4;
 pub const TEXTURE_SIZE: usize = TEXTURE_WIDTH * 2;
 pub const SMOOTHING: f32 = 0.7;
 

@@ -51,7 +51,7 @@ var fft_sampler: sampler;
 let PI = 3.14159265359;
 
 let bands = 50.0;
-let segs = 60.0;
+let segs = 30.0;
 
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
@@ -67,7 +67,6 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 
 	//TODO: This method has gaps. If we have 30 bands and a 256 texture, then we should sample 8 values.
 
-
     var tex_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
 	var fft_dimensions = vec2<f32>(textureDimensions(fft_buffer));
     var fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(p.x, 0.25)).r;
@@ -81,9 +80,8 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     // led shape
     var d = fract((uv - p) *vec2<f32>(bands, segs)) - 0.5;
     var led = smoothStep(0.5, 0.35, abs(d.x)) * smoothStep(0.5, 0.35, abs(d.y));
-    var ledColor = led*color*mask;
+    var ledColor = led * color * mask;
 
-	var col = pow(ledColor, vec3<f32>(1.0/2.2));
     var srgb = pow(ledColor, vec3<f32>(2.2));
     // output final color
     return vec4<f32>(srgb, 1.0);

@@ -1,5 +1,18 @@
 # Notes
 
+## TODO
+
+- Sound wave texture
+- Beat detection + texture
+- Make all 3 textures (freq, wave, beat) Width x 10 or more textures and include previous steps.
+- Immediate mode UI
+  - Debug UI
+- Change parameters at runtime.
+- Start/stop control.
+- Selecting different shaders in UI at runtime
+- Transition between shaders
+- Maybe allow webasm code to control phases before shader.
+
 ## Seperate rendering
 
 This will also need seperation of the FFT and the rendering, which we should have.
