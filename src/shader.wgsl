@@ -70,8 +70,10 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 	var col2 = vec3<f32>(BAR_COLOR * horizontal * vertical);
 
 	// Basic white output
-	var col = vec3<f32>(step(uv.y, fft_sample));
+	//var col = vec3<f32>(step(uv.y, fft_sample));
+	var col = vec3<f32>(fft_sample, 4.0*fft_sample*(1.0-fft_sample), 1.0-fft_sample ) * fft_sample;
 
-	col = pow(col, vec3<f32>(1.0/2.2));
+
+	//col = pow(col, vec3<f32>(1.0/2.2));
 	return vec4<f32>(col, 1.0);
 }

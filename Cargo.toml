@@ -21,3 +21,5 @@ image = "0.24"
 ringbuf = "0.2"
 rustfft = "6.0"
 cpal = "0.13"
+
+spin_sleep = "1.1"

@@ -5,7 +5,7 @@ use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
-use crate::{camera, fft_buffer, texture, TEXTURE_WIDTH};
+use crate::{camera, fft_buffer, texture};
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -142,9 +142,7 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let fft_buffer =
-            fft_buffer::FFTBuffer::from_buffer(&device, &queue, TEXTURE_WIDTH, "fft_buffer")
-                .unwrap();
+        let fft_buffer = fft_buffer::FFTBuffer::from_buffer(&device, &queue, "fft_buffer").unwrap();
 
         let fft_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

@@ -50,8 +50,8 @@ var fft_sampler: sampler;
 
 let PI = 3.14159265359;
 
-let bands = 30.0;
-let segs = 40.0;
+let bands = 50.0;
+let segs = 60.0;
 
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
@@ -64,6 +64,8 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     var p = vec2<f32>(0.0);
     p.x = floor(uv.x*bands)/bands;
     p.y = floor(uv.y*segs)/segs;
+
+	//TODO: This method has gaps. If we have 30 bands and a 256 texture, then we should sample 8 values.
 
 
     var tex_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);

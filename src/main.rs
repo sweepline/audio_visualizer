@@ -1,12 +1,16 @@
-use anyhow::Error;
 use core::f32::consts::PI;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize, SupportedBufferSize,
 };
-use ringbuf::RingBuffer;
+use ringbuf::{Consumer, RingBuffer};
 use rustfft::{num_complex::Complex32, FftPlanner};
-use std::time::Instant;
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -18,21 +22,17 @@ mod fft_buffer;
 mod state;
 mod texture;
 
-pub const FREQ_RANGE: (f32, f32) = (10., 10000.);
-pub const TEXTURE_WIDTH: u32 = 512;
-pub const FFT_SIZE: usize = 1024;
+pub const FFT_SIZE: usize = 1024; // 2^n
+pub const TEXTURE_WIDTH: usize = FFT_SIZE / 4; // 1/4 size of FFT_SIZE for 0-10kHz
+pub const TEXTURE_SIZE: usize = TEXTURE_WIDTH * 2;
 pub const SMOOTHING: f32 = 0.7;
 
-pub fn hann_window(samples: &mut [f32]) -> Result<(), Error> {
-    let samples_len_f32 = samples.len() as f32;
-    for (i, sample) in samples.iter_mut().enumerate() {
-        let two_pi_i = 2. * PI * i as f32;
-        let idontknowthename = f32::cos(two_pi_i / samples_len_f32);
-        let multiplier = 0.5 * (1. - idontknowthename);
-        let windowed = multiplier * *sample;
-        *sample = windowed;
-    }
-    Ok(())
+pub fn blackman_single(sample: f32, n: f32, len: f32) -> f32 {
+    let a0 = (1. - 0.16) / 2.;
+    let a1 = 0.5;
+    let a2 = 0.16 / 2.;
+    let w = a0 - a1 * f32::cos((2. * PI * n) / len) + a2 * f32::cos((4. * PI * n) / len);
+    sample * w
 }
 
 pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
@@ -46,16 +46,11 @@ pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    println!("WOW");
     let event_loop = EventLoop::new();
-    println!("WOW");
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    // FFT STUFF MOVE INTO STRUCT FOR STATE.
-    // ALSO MAKE RENDER STATE AND PROGRAM STATE SEPERATE.
     let host = cpal::default_host();
     let device = host.default_input_device().unwrap();
-    println!("WOW");
 
     let mut config = device
         .default_input_config()
@@ -109,18 +104,17 @@ async fn main() {
         producer.push(0.).unwrap();
     }
 
-    let mut planner = FftPlanner::new();
-
     let mut now = Instant::now();
     fn err_fn(err: cpal::StreamError) {
         eprintln!("an error occurred on stream: {}", err);
     }
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         println!(
-            "creating {:?} samples, for {:?} ms",
+            "\u{001b}[1000B\u{001b}[1000D\u{001b}[3A\u{001b}[2KCreating {:?} samples, for {:?} ms",
             data.len(),
             now.elapsed().as_millis()
         );
+        let _ = std::io::stdout().flush();
         now = Instant::now();
         let mut output_fell_behind = false;
         for &sample in data {
@@ -129,12 +123,20 @@ async fn main() {
             }
         }
         if output_fell_behind {
-            eprintln!("output stream fell behind: try increasing latency");
+            eprintln!("Output stream fell behind: try increasing latency");
         }
     };
     // END FFT
 
     let mut state = state::State::new(&window).await;
+
+    // Better performance with Arc<[Atomic]>....
+    let tex_handle: Arc<Mutex<[f32; TEXTURE_WIDTH]>> = Arc::new(Mutex::new([0.; TEXTURE_WIDTH]));
+
+    let fft_tex_handle = tex_handle.clone();
+    thread::spawn(move || {
+        fft_analysis(&mut consumer, fft_tex_handle, sample_rate);
+    });
 
     // START FFT
     let stream = device
@@ -142,12 +144,11 @@ async fn main() {
         .unwrap();
     stream.play().unwrap();
 
-    let mut texture: [f32; TEXTURE_WIDTH as usize] = [0.; TEXTURE_WIDTH as usize];
-    let mut amplitudes: [f32; FFT_SIZE as usize / 2] = [0.; FFT_SIZE as usize / 2];
-    let mut fft_buf: [Complex32; FFT_SIZE as usize] = [Complex32::default(); FFT_SIZE as usize];
-    // TODO: Probably bad to run this before every process.
-    let fft = planner.plan_fft_forward(FFT_SIZE);
-    let mut now2 = Instant::now();
+    print!("\u{001b}[2J");
+    let _ = std::io::stdout().flush();
+    let mut frames = 0;
+    let mut timer = Instant::now();
+
     // END FFT.
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -180,101 +181,24 @@ async fn main() {
                 }
             }
             Event::MainEventsCleared => {
-                // START FFT
-                let elapsed = now2.elapsed().as_micros();
-                if elapsed > fft_delay_us as u128 {
-                    // TODO: do something about time drift (fix your timestep).
-                    now2 = Instant::now();
-                    // Time elapsed in microseconds * samples per microseconds
-                    let exact_samples = elapsed as f32 * sr_us;
-                    println!(
-                        "time-drift: {:?} ms",
-                        (elapsed - fft_delay_us) as f32 / 1000.
-                    );
-                    println!(
-                        "consuming {:?} samples, for {:?} ms",
-                        exact_samples,
-                        elapsed / 1_000
-                    );
-                    // println!("{:?}", texture);
-
-                    let mut input_fell_behind = false;
-                    for i in 0..FFT_SIZE {
-                        let x = match consumer.pop() {
-                            Some(s) => s,
-                            None => {
-                                input_fell_behind = true;
-                                0.
-                            }
-                        };
-                        fft_buf[i] = Complex32::new(hann_single(x, i, FFT_SIZE), 0.);
-                    }
-
-                    if input_fell_behind {
-                        eprintln!("input stream fell behind: try increasing latency");
-                    }
-
-                    // TODO: optimize this call to with_scratch
-                    fft.process(&mut fft_buf);
-
-                    // println!(
-                    //     "bin size: {:?}, buckets: {}",
-                    //     sample_rate / fft_samples as f32,
-                    //     bucketed.len()
-                    // );
-
-                    // Something about getting half the samples as you put in.
-
-                    let bin_freq = sample_rate / FFT_SIZE as f32;
-
-                    texture.fill(0.); // CLEAR THE TEXTURE
-                    let freq_amp = fft_buf.into_iter().take(FFT_SIZE / 2).enumerate();
-                    for (i, amp) in freq_amp {
-                        let amp = amp / FFT_SIZE as f32;
-                        let amp_prev = amplitudes[i];
-                        let amp = SMOOTHING * amp_prev + (1. - SMOOTHING) * amp.norm();
-                        amplitudes[i] = amp;
-
-                        let freq = i as f32 * bin_freq;
-                        // if freq < FREQ_RANGE.0 || freq > FREQ_RANGE.1 {
-                        //     continue;
-                        // }
-
-                        // Map one range to another
-                        // int input_range = input_end - input_start;
-                        // int output_range = output_end - output_start;
-                        // output = (input - input_start)*output_range / input_range + output_start;
-                        let input_range = (FREQ_RANGE.1 - FREQ_RANGE.0) as usize;
-                        let bin_n = (freq - FREQ_RANGE.0) as usize * TEXTURE_WIDTH as usize
-                            / input_range
-                            + 0;
-
-                        if i < texture.len() {
-                            texture[i] += amp;
-                        }
-                    }
-                    for amp in texture.iter_mut() {
-                        let db = 20. * f32::log10(*amp);
-                        let db = db.clamp(-100., -20.);
-                        let normalized = (db - -100.) / (-30. - -100.);
-                        *amp = normalized;
-                    }
-
-                    // let max_peak = freq_amp.iter().max_by_key(|&(_, c)| *c as u32);
-                    // let min_peak = freq_amp.iter().min_by_key(|&(_, c)| *c as u32);
-                    // let min_freq = freq_amp.iter().min_by_key(|&(f, _)| *f as u32).unwrap();
-                    // let max_freq = freq_amp.iter().max_by_key(|&(f, _)| *f as u32).unwrap();
-                    // // println!("Min freq {}, max freq {}", min_freq.0, max_freq.0);
-                    // if let Some((freq, amp)) = max_peak {
-                    //     println!("Max peak was {}, with amplitude {}", freq, amp);
-                    // }
-                    // if let Some((freq, amp)) = min_peak {
-                    //     println!("Min peak was {}, with amplitude {}", freq, amp);
-                    // }
+                if frames > 120 {
+                    print!("\u{001b}[2J");
+                    let _ = std::io::stdout().flush();
+                    frames = 0;
+                } else {
+                    frames += 1;
                 }
-                // END FFT
 
-                state.update(&texture);
+                if let Ok(texture) = tex_handle.try_lock() {
+                    let fps = 1_000_000 / timer.elapsed().as_micros();
+                    let mul = 2;
+                    let fps = ((fps + mul - 1) / mul) * mul;
+                    print!("\u{001b}[1000B\u{001b}[1000D\u{001b}[2KFPS: {:?}", fps);
+                    timer = Instant::now();
+                    let _ = std::io::stdout().flush();
+
+                    state.update(&*texture);
+                }
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
@@ -296,73 +220,103 @@ async fn main() {
     });
 }
 
-#[allow(dead_code)]
-fn enumerate_devices() -> Result<(), anyhow::Error> {
-    println!("Supported hosts:\n  {:?}", cpal::ALL_HOSTS);
-    let available_hosts = cpal::available_hosts();
-    println!("Available hosts:\n  {:?}", available_hosts);
+fn fft_analysis(consumer: &mut Consumer<f32>, texture_handle: Arc<Mutex<[f32]>>, sample_rate: f32) {
+    let sr_ms = sample_rate / 1_000.;
+    let sr_us = sr_ms / 1_000.;
+    let fft_delay_us = (FFT_SIZE as f32 / sr_us).round() as u128;
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(FFT_SIZE);
+    let mut scratch = vec![Complex32::default(); fft.get_inplace_scratch_len()];
 
-    for host_id in available_hosts {
-        println!("{}", host_id.name());
-        let host = cpal::host_from_id(host_id)?;
+    // let mut texture: [f32; TEXTURE_WIDTH] = [0.; TEXTURE_WIDTH];
+    let mut amplitudes: [f32; FFT_SIZE as usize / 2] = [0.; FFT_SIZE as usize / 2];
+    let mut fft_buf: [Complex32; FFT_SIZE as usize] = [Complex32::default(); FFT_SIZE as usize];
+    let mut timer = Instant::now();
 
-        let default_in = host.default_input_device().map(|e| e.name().unwrap());
-        let default_out = host.default_output_device().map(|e| e.name().unwrap());
-        println!("  Default Input Device:\n    {:?}", default_in);
-        println!("  Default Output Device:\n    {:?}", default_out);
+    loop {
+        // START FFT
+        let elapsed = timer.elapsed().as_micros();
+        if elapsed > fft_delay_us as u128 {
+            // TODO: do something about time drift (fix your timestep).
+            timer = Instant::now();
+            // Time elapsed in microseconds * samples per microseconds
+            let exact_samples = elapsed as f32 * sr_us;
+            print!(
+                "\u{001b}[1000B\u{001b}[1000D\u{001b}[1A\u{001b}[2KTime drift: {:?} ms",
+                (elapsed - fft_delay_us) as f32 / 1000.
+            );
+            print!(
+                "\u{001b}[1000B\u{001b}[1000D\u{001b}[2A\u{001b}[2KConsuming {:?} samples, for {:?} ms",
+                exact_samples as usize,
+                elapsed / 1_000
+            );
+            let _ = std::io::stdout().flush();
 
-        let devices = host.devices()?;
-        println!("  Devices: ");
-        for (device_index, device) in devices.enumerate() {
-            println!("  {}. \"{}\"", device_index + 1, device.name()?);
-
-            // Input configs
-            if let Ok(conf) = device.default_input_config() {
-                println!("    Default input stream config:\n      {:?}", conf);
+            let mut input_fell_behind = false;
+            for i in 0..FFT_SIZE {
+                let x = match consumer.pop() {
+                    Some(s) => s,
+                    None => {
+                        input_fell_behind = true;
+                        0.
+                    }
+                };
+                fft_buf[i] = Complex32::new(blackman_single(x, i as f32, FFT_SIZE as f32), 0.);
             }
-            let input_configs = match device.supported_input_configs() {
-                Ok(f) => f.collect(),
-                Err(e) => {
-                    println!("    Error getting supported input configs: {:?}", e);
-                    Vec::new()
-                }
+
+            if input_fell_behind {
+                eprintln!("Input stream fell behind: try increasing latency");
+            }
+
+            fft.process_with_scratch(&mut fft_buf, &mut scratch);
+
+            let _bin_freq = sample_rate / FFT_SIZE as f32;
+
+            let Ok(mut texture) = texture_handle.lock() else {
+                panic!("TEXTURE MUTEX FFT SIDE");
             };
-            if !input_configs.is_empty() {
-                println!("    All supported input stream configs:");
-                for (config_index, config) in input_configs.into_iter().enumerate() {
-                    println!(
-                        "      {}.{}. {:?}",
-                        device_index + 1,
-                        config_index + 1,
-                        config
-                    );
-                }
-            }
+            texture.fill(0.); // CLEAR THE TEXTURE
+            let freq_amp = fft_buf.into_iter().take(FFT_SIZE / 2).enumerate();
+            for (i, amp) in freq_amp {
+                let amp = amp / FFT_SIZE as f32;
+                let amp_prev = amplitudes[i];
+                let amp = SMOOTHING * amp_prev + (1. - SMOOTHING) * amp.norm();
+                amplitudes[i] = amp;
 
-            // Output configs
-            if let Ok(conf) = device.default_output_config() {
-                println!("    Default output stream config:\n      {:?}", conf);
-            }
-            let output_configs = match device.supported_output_configs() {
-                Ok(f) => f.collect(),
-                Err(e) => {
-                    println!("    Error getting supported output configs: {:?}", e);
-                    Vec::new()
-                }
-            };
-            if !output_configs.is_empty() {
-                println!("    All supported output stream configs:");
-                for (config_index, config) in output_configs.into_iter().enumerate() {
-                    println!(
-                        "      {}.{}. {:?}",
-                        device_index + 1,
-                        config_index + 1,
-                        config
-                    );
+                // Map one range to another
+                // int input_range = input_end - input_start;
+                // int output_range = output_end - output_start;
+                // output = (input - input_start)*output_range / input_range + output_start;
+
+                // TODO: Why is the last part missing?
+                if i < texture.len() {
+                    texture[i] += amp;
                 }
             }
+            const DB_LO: f32 = -100.;
+            const DB_HI: f32 = -10.;
+            for amp in texture.iter_mut() {
+                let db = 20. * f32::log10(*amp);
+                let db = db.clamp(DB_LO, DB_HI);
+                let normalized = (db - DB_LO) / (DB_HI - DB_LO);
+                *amp = normalized;
+            }
+            drop(texture);
+
+            // let max_peak = freq_amp.iter().max_by_key(|&(_, c)| *c as u32);
+            // let min_peak = freq_amp.iter().min_by_key(|&(_, c)| *c as u32);
+            // let min_freq = freq_amp.iter().min_by_key(|&(f, _)| *f as u32).unwrap();
+            // let max_freq = freq_amp.iter().max_by_key(|&(f, _)| *f as u32).unwrap();
+            // // println!("Min freq {}, max freq {}", min_freq.0, max_freq.0);
+            // if let Some((freq, amp)) = max_peak {
+            //     println!("Max peak was {}, with amplitude {}", freq, amp);
+            // }
+            // if let Some((freq, amp)) = min_peak {
+            //     println!("Min peak was {}, with amplitude {}", freq, amp);
+            // }
+            let early_wake_us: u128 = 30; // Because we want to stop sleeping a little before.
+            let remaining = fft_delay_us - timer.elapsed().as_micros() - early_wake_us;
+            spin_sleep::sleep(Duration::from_micros(remaining as u64))
         }
     }
-
-    Ok(())
 }
