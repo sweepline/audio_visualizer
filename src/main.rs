@@ -3,7 +3,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize, SupportedBufferSize,
 };
-use ringbuf::{Consumer, RingBuffer};
+use ringbuf::{Consumer, StaticRb};
 use rustfft::{num_complex::Complex32, FftPlanner};
 use std::{
     io::Write,
@@ -21,13 +21,19 @@ mod camera;
 mod fft_buffer;
 mod state;
 mod texture;
+mod ui;
 
 // Should be 2^n.
 pub const FFT_SIZE: usize = 1024;
 // 1/4 size of FFT_SIZE for 0-10kHz assuming a 44.1kHz Source.
+// Width must be less than or equal to FFT_SIZE
 pub const TEXTURE_WIDTH: usize = FFT_SIZE / 4;
-pub const TEXTURE_SIZE: usize = TEXTURE_WIDTH * 2;
+pub const TEXTURE_HEIGHT: usize = 2;
+pub const TEXTURE_SIZE: usize = TEXTURE_WIDTH * TEXTURE_HEIGHT;
 pub const SMOOTHING: f32 = 0.7;
+pub const RING_SIZE: usize = FFT_SIZE * 4;
+
+pub type TextureHandle = Arc<Mutex<[f32; TEXTURE_SIZE]>>;
 
 pub fn blackman_single(sample: f32, n: f32, len: f32) -> f32 {
     let a0 = (1. - 0.16) / 2.;
@@ -49,7 +55,10 @@ pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
 async fn main() {
     env_logger::init();
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window = WindowBuilder::new()
+        .with_transparent(true)
+        .build(&event_loop)
+        .unwrap();
 
     let host = cpal::default_host();
     let device = host.default_input_device().unwrap();
@@ -97,12 +106,11 @@ async fn main() {
     println!("CHANNELS: {:?}", channels);
 
     // The buffer to share samples make it twice the needed length
-    let ring_size = FFT_SIZE * 4;
-    let ring = RingBuffer::<f32>::new(ring_size);
+    let ring = StaticRb::<f32, RING_SIZE>::default();
     let (mut producer, mut consumer) = ring.split();
 
     // Fill the samples with 0. equal to the length of the delay.
-    for _ in 0..ring_size {
+    for _ in 0..RING_SIZE {
         producer.push(0.).unwrap();
     }
 
@@ -133,7 +141,7 @@ async fn main() {
     let mut state = state::State::new(&window).await;
 
     // Better performance with Arc<[Atomic]>....
-    let tex_handle: Arc<Mutex<[f32; TEXTURE_WIDTH]>> = Arc::new(Mutex::new([0.; TEXTURE_WIDTH]));
+    let tex_handle: TextureHandle = Arc::new(Mutex::new([0.; TEXTURE_SIZE]));
 
     let fft_tex_handle = tex_handle.clone();
     thread::spawn(move || {
@@ -142,7 +150,7 @@ async fn main() {
 
     // START FFT
     let stream = device
-        .build_input_stream(&config.into(), input_data_fn, err_fn)
+        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
         .unwrap();
     stream.play().unwrap();
 
@@ -153,8 +161,35 @@ async fn main() {
 
     // END FFT.
     event_loop.run(move |event, _, control_flow| {
+        state.ui.handle_event(&event);
         *control_flow = ControlFlow::Poll;
         match event {
+            Event::MainEventsCleared => {
+                if frames > 120 {
+                    print!("\u{001b}[2J");
+                    let _ = std::io::stdout().flush();
+                    frames = 0;
+                } else {
+                    frames += 1;
+                }
+                let fps = 1_000_000 / timer.elapsed().as_micros();
+                let mul = 2;
+                let fps = ((fps + mul - 1) / mul) * mul;
+                print!("\u{001b}[1000B\u{001b}[1000D\u{001b}[2KFPS: {:?}", fps);
+                timer = Instant::now();
+                let _ = std::io::stdout().flush();
+
+                state.update(tex_handle.clone());
+                match state.render(&window) {
+                    Ok(_) => {}
+                    // Reconfigure the surface if lost
+                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    // The system is out of memory, we should probably quit
+                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                    // All other errors (Outdated, Timeout) should be resolved by the next frame
+                    Err(e) => eprintln!("{:?}", e),
+                }
+            }
             Event::WindowEvent {
                 ref event,
                 window_id,
@@ -182,35 +217,6 @@ async fn main() {
                     }
                 }
             }
-            Event::MainEventsCleared => {
-                if frames > 120 {
-                    print!("\u{001b}[2J");
-                    let _ = std::io::stdout().flush();
-                    frames = 0;
-                } else {
-                    frames += 1;
-                }
-
-                if let Ok(texture) = tex_handle.try_lock() {
-                    let fps = 1_000_000 / timer.elapsed().as_micros();
-                    let mul = 2;
-                    let fps = ((fps + mul - 1) / mul) * mul;
-                    print!("\u{001b}[1000B\u{001b}[1000D\u{001b}[2KFPS: {:?}", fps);
-                    timer = Instant::now();
-                    let _ = std::io::stdout().flush();
-
-                    state.update(&*texture);
-                }
-                match state.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => eprintln!("{:?}", e),
-                }
-            }
             Event::Suspended => {
                 println!("SUSPENDED");
             }
@@ -222,7 +228,11 @@ async fn main() {
     });
 }
 
-fn fft_analysis(consumer: &mut Consumer<f32>, texture_handle: Arc<Mutex<[f32]>>, sample_rate: f32) {
+fn fft_analysis(
+    consumer: &mut Consumer<f32, Arc<StaticRb<f32, RING_SIZE>>>,
+    texture_handle: Arc<Mutex<[f32]>>,
+    sample_rate: f32,
+) {
     let sr_ms = sample_rate / 1_000.;
     let sr_us = sr_ms / 1_000.;
     let fft_delay_us = (FFT_SIZE as f32 / sr_us).round() as u128;
@@ -263,6 +273,7 @@ fn fft_analysis(consumer: &mut Consumer<f32>, texture_handle: Arc<Mutex<[f32]>>,
                         0.
                     }
                 };
+                // Apply windowing function to the input
                 fft_buf[i] = Complex32::new(blackman_single(x, i as f32, FFT_SIZE as f32), 0.);
             }
 
@@ -277,20 +288,22 @@ fn fft_analysis(consumer: &mut Consumer<f32>, texture_handle: Arc<Mutex<[f32]>>,
             let Ok(mut texture) = texture_handle.lock() else {
                 panic!("TEXTURE MUTEX FFT SIDE");
             };
-            texture.fill(0.); // CLEAR THE TEXTURE
-            let freq_amp = fft_buf.into_iter().take(FFT_SIZE / 2).enumerate();
+
+            // TODO: Maybe move this out of this loop and to the main thread?
+            // The buffer has the last TEXTURE_HEIGHT fft runs.
+            // With the first TEXTURE_WIDTH elements being the newest run.
+            // So rotate the elements back one TEXTURE_WIDTH and write the
+            // new run to the buffer at the front.
+            texture.rotate_right(TEXTURE_WIDTH);
+            texture[..TEXTURE_WIDTH].copy_from_slice(&[0.; TEXTURE_WIDTH]);
+
+            let freq_amp = fft_buf.into_iter().take(TEXTURE_WIDTH).enumerate();
             for (i, amp) in freq_amp {
                 let amp = amp / FFT_SIZE as f32;
                 let amp_prev = amplitudes[i];
                 let amp = SMOOTHING * amp_prev + (1. - SMOOTHING) * amp.norm();
                 amplitudes[i] = amp;
 
-                // Map one range to another
-                // int input_range = input_end - input_start;
-                // int output_range = output_end - output_start;
-                // output = (input - input_start)*output_range / input_range + output_start;
-
-                // TODO: Why is the last part missing?
                 if i < texture.len() {
                     texture[i] += amp;
                 }
@@ -303,6 +316,8 @@ fn fft_analysis(consumer: &mut Consumer<f32>, texture_handle: Arc<Mutex<[f32]>>,
                 let normalized = (db - DB_LO) / (DB_HI - DB_LO);
                 *amp = normalized;
             }
+
+            // Done with the texture so drop it so the rendering can use it.
             drop(texture);
 
             // let max_peak = freq_amp.iter().max_by_key(|&(_, c)| *c as u32);

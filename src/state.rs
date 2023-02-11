@@ -1,11 +1,19 @@
-use std::{num::NonZeroU32, time::Instant};
+use std::{
+    num::NonZeroU32,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+use egui::FontDefinitions;
+use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
+use egui_winit_platform::{Platform, PlatformDescriptor};
 
 use std::iter;
 
-use wgpu::util::DeviceExt;
+use wgpu::{util::DeviceExt, TextureFormat};
 use winit::{event::*, window::Window};
 
-use crate::{camera, fft_buffer, texture};
+use crate::{camera, fft_buffer, texture, ui::UiState, TextureHandle, TEXTURE_WIDTH};
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -49,33 +57,33 @@ impl Vertex {
 
 pub const VERTICES: &[Vertex] = &[
     Vertex {
-        position: glam::const_vec3!([-1.0, 1.0, 0.0]),
-        tex_coords: glam::const_vec2!([0.0, 0.0]),
+        position: glam::vec3(-1.0, 1.0, 0.0),
+        tex_coords: glam::vec2(0.0, 0.0),
     }, // Top Left
     Vertex {
-        position: glam::const_vec3!([1.0, 1.0, 0.0]),
-        tex_coords: glam::const_vec2!([1.0, 0.0]),
+        position: glam::vec3(1.0, 1.0, 0.0),
+        tex_coords: glam::vec2(1.0, 0.0),
     }, // Top Right
     Vertex {
-        position: glam::const_vec3!([-1.0, -1.0, 0.0]),
-        tex_coords: glam::const_vec2!([0.0, 1.0]),
+        position: glam::vec3(-1.0, -1.0, 0.0),
+        tex_coords: glam::vec2(0.0, 1.0),
     }, // Bot Left
     Vertex {
-        position: glam::const_vec3!([1.0, -1.0, 0.0]),
-        tex_coords: glam::const_vec2!([1.0, 1.0]),
+        position: glam::vec3(1.0, -1.0, 0.0),
+        tex_coords: glam::vec2(1.0, 1.0),
     }, // Bot Right
 ];
 
 pub const INDICES: &[u16] = &[0, 2, 1, 1, 2, 3];
 
 pub struct State {
-    surface: wgpu::Surface,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    pub surface: wgpu::Surface,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
 
     pub size: winit::dpi::PhysicalSize<u32>,
-    time: Instant,
+    pub time: Instant,
     util_buffer: wgpu::Buffer,
     util_bind_group: wgpu::BindGroup,
 
@@ -95,6 +103,8 @@ pub struct State {
 
     fft_buffer: fft_buffer::FFTBuffer,
     fft_bind_group: wgpu::BindGroup,
+
+    pub ui: UiState,
 }
 
 impl State {
@@ -105,8 +115,11 @@ impl State {
 
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            dx12_shader_compiler: Default::default(),
+        });
+        let surface = unsafe { instance.create_surface(window) }.unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -133,9 +146,26 @@ impl State {
             .await
             .unwrap();
 
+        let surface_caps = surface.get_capabilities(&adapter);
+        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
+        // one will result all the colors coming out darker. If you want to support non
+        // sRGB surfaces, you'll need to account for that when drawing to the frame.
+
+        // Actually pick one that is not sRGB as we don't want to deal with it in the
+        // fragment shader. (like shadertoy).
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .filter(|f| !f.describe().srgb)
+            .next()
+            .unwrap_or(surface_caps.formats[0]);
+
         let config = wgpu::SurfaceConfiguration {
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_preferred_format(&adapter).unwrap(),
+            format: surface_format,
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
@@ -308,10 +338,11 @@ impl State {
             label: Some("util_bind_group"),
         });
 
-        let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("led_shader.wgsl").into()),
-        });
+        let shader = device.create_shader_module(wgpu::include_wgsl!("led_shader.wgsl"));
+        // wgpu::ShaderModuleDescriptor {
+        //     label: Some("Shader"),
+        //     source: wgpu::ShaderSource::Wgsl(include_str!("led_shader.wgsl").into()),
+        // });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -336,14 +367,14 @@ impl State {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[wgpu::ColorTargetState {
+                targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent::REPLACE,
                         alpha: wgpu::BlendComponent::REPLACE,
                     }),
                     write_mask: wgpu::ColorWrites::ALL,
-                }],
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -378,6 +409,8 @@ impl State {
         });
         let num_indices = INDICES.len() as u32;
 
+        let ui = UiState::new(&window, &device, surface_format);
+
         Self {
             surface,
             device,
@@ -399,6 +432,7 @@ impl State {
             time,
             util_buffer,
             util_bind_group,
+            ui,
         }
     }
 
@@ -422,7 +456,7 @@ impl State {
         self.time.elapsed().as_secs_f32()
     }
 
-    pub fn update(&mut self, fft_data: &[f32]) {
+    pub fn update(&mut self, fft_texture: TextureHandle) {
         self.camera_controller.update_camera(&mut self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -438,9 +472,11 @@ impl State {
         self.queue.write_buffer(&self.util_buffer, 0, data);
 
         let fft = &mut self.fft_buffer;
-        for (i, e) in fft_data.into_iter().enumerate() {
-            fft.buffer[i] = *e;
+        // We might not have gotten the lock, so just leave the data the same.
+        if let Ok(fft_texture) = fft_texture.try_lock() {
+            fft.buffer.copy_from_slice(fft_texture.as_slice());
         }
+
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
                 aspect: wgpu::TextureAspect::All,
@@ -456,9 +492,11 @@ impl State {
             },
             fft.size,
         );
+
+        self.ui.update(&self.time);
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -473,14 +511,14 @@ impl State {
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
-                color_attachments: &[wgpu::RenderPassColorAttachment {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: true,
                     },
-                }],
+                })],
                 depth_stencil_attachment: None,
             });
 
@@ -493,6 +531,15 @@ impl State {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
+
+        let _ok = self.ui.render(
+            &mut encoder,
+            &view,
+            window,
+            &self.device,
+            &self.queue,
+            &self.config,
+        );
 
         self.queue.submit(iter::once(encoder.finish()));
         output.present();

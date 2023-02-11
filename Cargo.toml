@@ -6,20 +6,26 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-env_logger = "0.9"
+env_logger = "0.10"
 log = "0.4"
 anyhow = "1.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.25", features = ["full"] }
 
-winit = "0.26"
-wgpu = "0.12"
-glam = { version = "0.20", features = [ "bytemuck", "rand"] }
-bytemuck = { version = "1.9", features = [ "derive" ] }
+winit = { version = "0.27", features = [] }
+wgpu = "0.15"
+glam = { version = "0.22", features = [ "bytemuck", "rand"] }
+bytemuck = { version = "1.13", features = [ "derive" ] }
+
+# UI
+egui_wgpu_backend = "0.21"
+egui = "0.20"
+egui_winit_platform = "0.17"
+egui_demo_lib = "0.20"
 
 image = "0.24"
 
-ringbuf = "0.2"
+ringbuf = "0.3"
 rustfft = "6.0"
-cpal = "0.13"
+cpal = "0.15"
 
 spin_sleep = "1.1"

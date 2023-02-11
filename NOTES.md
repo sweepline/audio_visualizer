@@ -43,3 +43,11 @@ Have two shaders running and blend them when switching? Maybe something more ela
 ## Modular
 
 I should probably make the visualizations codable with webasm so you don't have to recompile the program?
+
+## Map one range to another
+
+```
+int input_range = input_end - input_start;
+int output_range = output_end - output_start;
+output = (input - input_start)*output_range / input_range + output_start;
+```
