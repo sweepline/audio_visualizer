@@ -115,18 +115,10 @@ async fn main() {
         producer.push(0.).unwrap();
     }
 
-    let mut now = Instant::now();
     fn err_fn(err: cpal::StreamError) {
         eprintln!("an error occurred on stream: {}", err);
     }
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        // println!(
-        //     "\u{001b}[1000B\u{001b}[1000D\u{001b}[3A\u{001b}[2KCreating {:?} samples, for {:?} ms",
-        //     data.len(),
-        //     now.elapsed().as_millis()
-        // );
-        let _ = std::io::stdout().flush();
-        now = Instant::now();
         let mut output_fell_behind = false;
         for &sample in data {
             if producer.push(sample).is_err() {
@@ -155,9 +147,6 @@ async fn main() {
         .unwrap();
     stream.play().unwrap();
 
-    // print!("\u{001b}[2J");
-    let _ = std::io::stdout().flush();
-    let mut frames = 0;
     let mut timer = Instant::now();
 
     // END FFT.
@@ -166,19 +155,10 @@ async fn main() {
         *control_flow = ControlFlow::Poll;
         match event {
             Event::MainEventsCleared => {
-                // if frames > 120 {
-                //     print!("\u{001b}[2J");
-                //     let _ = std::io::stdout().flush();
-                //     frames = 0;
-                // } else {
-                //     frames += 1;
-                // }
                 let fps = 1_000_000 / timer.elapsed().as_micros();
-                let mul = 2;
+                let mul = 2; // Make fps a multiple of mul;
                 let fps = ((fps + mul - 1) / mul) * mul;
-                // print!("\u{001b}[1000B\u{001b}[1000D\u{001b}[2KFPS: {:?}", fps);
                 timer = Instant::now();
-                let _ = std::io::stdout().flush();
 
                 state.update(tex_handle.clone());
                 match state.render(&window) {
@@ -232,7 +212,6 @@ fn fft_analysis(
     let fft = planner.plan_fft_forward(FFT_SIZE);
     let mut scratch = vec![Complex32::default(); fft.get_inplace_scratch_len()];
 
-    // let mut texture: [f32; TEXTURE_WIDTH] = [0.; TEXTURE_WIDTH];
     let mut amplitudes: [f32; FFT_SIZE as usize / 2] = [0.; FFT_SIZE as usize / 2];
     let mut fft_buf: [Complex32; FFT_SIZE as usize] = [Complex32::default(); FFT_SIZE as usize];
     let mut timer = Instant::now();
@@ -245,16 +224,7 @@ fn fft_analysis(
             timer = Instant::now();
             // Time elapsed in microseconds * samples per microseconds
             let exact_samples = elapsed as f32 * sr_us;
-            // print!(
-            //     "\u{001b}[1000B\u{001b}[1000D\u{001b}[1A\u{001b}[2KTime drift: {:?} ms",
-            //     (elapsed - fft_delay_us) as f32 / 1000.
-            // );
-            // print!(
-            //     "\u{001b}[1000B\u{001b}[1000D\u{001b}[2A\u{001b}[2KConsuming {:?} samples, for {:?} ms",
-            //     exact_samples as usize,
-            //     elapsed / 1_000
-            // );
-            let _ = std::io::stdout().flush();
+            let time_drift = elapsed - fft_delay_us;
 
             let mut input_fell_behind = false;
             for i in 0..FFT_SIZE {
