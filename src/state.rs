@@ -1,19 +1,11 @@
-use std::{
-    num::NonZeroU32,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
-
-use egui::FontDefinitions;
-use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
-use egui_winit_platform::{Platform, PlatformDescriptor};
+use std::{num::NonZeroU32, time::Instant};
 
 use std::iter;
 
 use wgpu::{util::DeviceExt, TextureFormat};
 use winit::{event::*, window::Window};
 
-use crate::{camera, fft_buffer, texture, ui::UiState, TextureHandle, TEXTURE_WIDTH};
+use crate::{camera, fft_buffer, texture, ui::UiState, TextureHandle};
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -147,12 +139,8 @@ impl State {
             .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
 
-        // Actually pick one that is not sRGB as we don't want to deal with it in the
-        // fragment shader. (like shadertoy).
+        // Pick a non SRGB surface such that we don't have to convert in-shader.
         let surface_format = surface_caps
             .formats
             .iter()
@@ -160,6 +148,7 @@ impl State {
             .filter(|f| !f.describe().srgb)
             .next()
             .unwrap_or(surface_caps.formats[0]);
+        println!("SURFACE TextureFormat: {:?}", surface_format);
 
         let config = wgpu::SurfaceConfiguration {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
@@ -476,6 +465,7 @@ impl State {
         if let Ok(fft_texture) = fft_texture.try_lock() {
             fft.buffer.copy_from_slice(fft_texture.as_slice());
         }
+        drop(fft_texture);
 
         self.queue.write_texture(
             wgpu::ImageCopyTexture {

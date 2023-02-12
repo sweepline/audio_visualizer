@@ -1,16 +1,13 @@
-use std::{num::NonZeroU32, time::Instant};
+use std::time::Instant;
 
 use egui::FontDefinitions;
 use egui_demo_lib::DemoWindows;
-use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
-use egui_winit_platform::{Platform, PlatformDescriptor};
 
-use std::iter;
-
-use wgpu::{util::DeviceExt, CommandEncoder, Device, TextureFormat, TextureView};
+use wgpu::{CommandEncoder, Device, TextureFormat, TextureView};
 use winit::{event::*, window::Window};
 
-use crate::{camera, fft_buffer, state::State, texture};
+use crate::egui_wgpu_backend::{RenderPass, ScreenDescriptor};
+use crate::egui_winit_platform::{Platform, PlatformDescriptor};
 
 pub struct UiState {
     platform: Platform,
@@ -22,13 +19,19 @@ impl UiState {
     pub fn new(window: &Window, device: &Device, surface_format: TextureFormat) -> Self {
         let size = window.inner_size();
         // We use the egui_winit_platform crate as the platform.
+        let mut font_definitions = FontDefinitions::default();
+        font_definitions
+            .font_data
+            .values_mut()
+            .for_each(|x| x.tweak.scale = 1.0);
         let platform = Platform::new(PlatformDescriptor {
             physical_width: size.width as u32,
             physical_height: size.height as u32,
             scale_factor: window.scale_factor(),
-            font_definitions: FontDefinitions::default(),
+            font_definitions,
             style: Default::default(),
         });
+        println!("SCALE: {:?}", window.scale_factor());
 
         // We use the egui_wgpu_backend crate as the render backend.
         let render_pass = RenderPass::new(&device, surface_format, 1);

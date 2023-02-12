@@ -11,21 +11,22 @@ log = "0.4"
 anyhow = "1.0"
 tokio = { version = "1.25", features = ["full"] }
 
-winit = { version = "0.27", features = [] }
+winit = { version = "0.28", features = [] }
 wgpu = "0.15"
 glam = { version = "0.22", features = [ "bytemuck", "rand"] }
 bytemuck = { version = "1.13", features = [ "derive" ] }
 
 # UI
-egui_wgpu_backend = "0.21"
-egui = "0.20"
-egui_winit_platform = "0.17"
-egui_demo_lib = "0.20"
+egui = { version = "0.21", features = ["bytemuck"] }
+egui_demo_lib = "0.21"
+copypasta = "0.8"
+webbrowser = "0.8"
+
 
 image = "0.24"
 
+# Sound analysis
 ringbuf = "0.3"
 rustfft = "6.0"
 cpal = "0.15"
-
 spin_sleep = "1.1"

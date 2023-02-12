@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use anyhow::*;
 
-use crate::{TEXTURE_SIZE, TEXTURE_WIDTH};
+use crate::{TEXTURE_HEIGHT, TEXTURE_SIZE, TEXTURE_WIDTH};
 
 pub fn to_byte_slice<'a>(floats: &'a [f32]) -> &'a [u8] {
     unsafe { std::slice::from_raw_parts(floats.as_ptr() as *const _, floats.len() * 4) }
@@ -18,11 +18,9 @@ pub struct FFTBuffer {
 
 impl FFTBuffer {
     pub fn from_buffer(device: &wgpu::Device, queue: &wgpu::Queue, label: &str) -> Result<Self> {
-        let dimensions = (TEXTURE_WIDTH as u32, 2);
-
         let size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
+            width: TEXTURE_WIDTH as u32,
+            height: TEXTURE_HEIGHT as u32,
             depth_or_array_layers: 1,
         };
 
@@ -50,8 +48,8 @@ impl FFTBuffer {
             &buf_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: NonZeroU32::new(4 * dimensions.0),
-                rows_per_image: NonZeroU32::new(dimensions.1),
+                bytes_per_row: NonZeroU32::new(4 * TEXTURE_WIDTH as u32),
+                rows_per_image: NonZeroU32::new(TEXTURE_HEIGHT as u32),
             },
             size,
         );
