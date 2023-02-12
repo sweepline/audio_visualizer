@@ -1,7 +1,5 @@
 use std::time::Instant;
 
-use egui_demo_lib::DemoWindows;
-
 use wgpu::{CommandEncoder, Device, TextureFormat, TextureView};
 use winit::{event::*, window::Window};
 
@@ -11,7 +9,6 @@ use crate::egui_integration::winit::{Platform, PlatformDescriptor};
 pub struct UiState {
     platform: Platform,
     egui_rp: RenderPass,
-    windows: DemoWindows,
     visible: bool,
     pressed_last_frame: bool,
 }
@@ -50,13 +47,9 @@ impl UiState {
         // We use the egui_wgpu_backend crate as the render backend.
         let render_pass = RenderPass::new(&device, surface_format, 1);
 
-        // Display the demo application that ships with egui.
-        let demo_app = egui_demo_lib::DemoWindows::default();
-
         Self {
             platform,
             egui_rp: render_pass,
-            windows: demo_app,
             visible: false,
             pressed_last_frame: false,
         }
@@ -113,7 +106,27 @@ impl UiState {
         self.platform.begin_frame();
 
         // Draw the demo application.
-        self.windows.ui(&self.platform.context());
+        // self.windows.ui(&self.platform.context());
+        let ctx = self.platform.context();
+
+        // TODO: Move this into an app struct.
+        let mut visuals = egui::Visuals::dark();
+        let mut rgba = egui::Rgba::from(visuals.panel_fill);
+        rgba[3] = 0.8;
+        visuals.panel_fill = rgba.into();
+        let style = egui::Style {
+            visuals,
+            ..Default::default()
+        };
+        egui::SidePanel::left("debug_panel")
+            .resizable(false)
+            .frame(egui::Frame::side_top_panel(&style))
+            .show(&ctx, |ui| {
+                ui.label("egui");
+                ui.add_space(12.0);
+                ui.separator();
+                ui.label("Immediate mode");
+            });
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.
         let full_output = self.platform.end_frame(Some(&window));
