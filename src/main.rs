@@ -17,13 +17,12 @@ use winit::{
     window::WindowBuilder,
 };
 
-mod camera;
+// mod camera;
+mod egui_integration;
 mod fft_buffer;
 mod state;
-mod texture;
+// mod texture;
 mod ui;
-mod egui_wgpu_backend;
-mod egui_winit_platform;
 
 // Should be 2^n.
 pub const FFT_SIZE: usize = 2048;
@@ -198,16 +197,7 @@ async fn main() {
             } if window_id == window.id() => {
                 if !state.input(event) {
                     match event {
-                        WindowEvent::CloseRequested
-                        | WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
-                                    ..
-                                },
-                            ..
-                        } => *control_flow = ControlFlow::Exit,
+                        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                         WindowEvent::Resized(physical_size) => {
                             state.resize(*physical_size);
                         }

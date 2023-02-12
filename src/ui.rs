@@ -1,37 +1,51 @@
 use std::time::Instant;
 
-use egui::FontDefinitions;
 use egui_demo_lib::DemoWindows;
 
 use wgpu::{CommandEncoder, Device, TextureFormat, TextureView};
 use winit::{event::*, window::Window};
 
-use crate::egui_wgpu_backend::{RenderPass, ScreenDescriptor};
-use crate::egui_winit_platform::{Platform, PlatformDescriptor};
+use crate::egui_integration::wgpu::{RenderPass, ScreenDescriptor};
+use crate::egui_integration::winit::{Platform, PlatformDescriptor};
 
 pub struct UiState {
     platform: Platform,
     egui_rp: RenderPass,
     windows: DemoWindows,
+    visible: bool,
+    pressed_last_frame: bool,
 }
 
 impl UiState {
     pub fn new(window: &Window, device: &Device, surface_format: TextureFormat) -> Self {
         let size = window.inner_size();
-        // We use the egui_winit_platform crate as the platform.
-        let mut font_definitions = FontDefinitions::default();
-        font_definitions
-            .font_data
-            .values_mut()
-            .for_each(|x| x.tweak.scale = 1.0);
+
         let platform = Platform::new(PlatformDescriptor {
             physical_width: size.width as u32,
             physical_height: size.height as u32,
             scale_factor: window.scale_factor(),
-            font_definitions,
+            font_definitions: egui::FontDefinitions::default(),
             style: Default::default(),
         });
-        println!("SCALE: {:?}", window.scale_factor());
+
+        {
+            // Change the fonts to be bigger;
+            use egui::FontFamily::Proportional;
+            use egui::FontId;
+            use egui::TextStyle::*;
+
+            let ctx = platform.context();
+            let mut style = (*ctx.style()).clone();
+            style.text_styles = [
+                (Heading, FontId::new(30.0, Proportional)),
+                (Body, FontId::new(18.0, Proportional)),
+                (Monospace, FontId::new(14.0, Proportional)),
+                (Button, FontId::new(14.0, Proportional)),
+                (Small, FontId::new(10.0, Proportional)),
+            ]
+            .into();
+            ctx.set_style(style);
+        }
 
         // We use the egui_wgpu_backend crate as the render backend.
         let render_pass = RenderPass::new(&device, surface_format, 1);
@@ -43,6 +57,35 @@ impl UiState {
             platform,
             egui_rp: render_pass,
             windows: demo_app,
+            visible: false,
+            pressed_last_frame: false,
+        }
+    }
+
+    pub fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(keycode),
+                        ..
+                    },
+                ..
+            } => {
+                let is_pressed = *state == ElementState::Pressed;
+                match keycode {
+                    VirtualKeyCode::F1 => {
+                        if is_pressed && !self.pressed_last_frame {
+                            self.visible = !self.visible;
+                        }
+                        self.pressed_last_frame = is_pressed;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
         }
     }
 
@@ -59,6 +102,13 @@ impl UiState {
         queue: &wgpu::Queue,
         config: &wgpu::SurfaceConfiguration,
     ) -> Result<(), wgpu::SurfaceError> {
+        if !self.visible {
+            // Returning at this point pauses animations,
+            // so if you want to have them continue in the background you have to
+            // do something about letting the ui render but not take input.
+            return Ok(());
+        }
+
         // Begin to draw the UI frame.
         self.platform.begin_frame();
 

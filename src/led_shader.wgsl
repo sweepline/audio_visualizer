@@ -1,18 +1,12 @@
 // Vertex shader
 
-struct CameraUniform {
-    view_proj: mat4x4<f32>,
-};
-@group(2) @binding(0)
-var<uniform> camera: CameraUniform;
-
 struct UtilUniform {
     time: f32,
     res_width: f32,
     res_height: f32,
 };
 
-@group(1) @binding(0)
+@group(0) @binding(0)
 var<uniform> util: UtilUniform;
 
 struct VertexInput {
@@ -39,14 +33,9 @@ fn vs_main(
 
 // Fragment shader
 
-@group(3) @binding(0)
-var t_diffuse: texture_2d<f32>;
-@group(3) @binding(1)
-var s_diffuse: sampler;
-
-@group(0) @binding(0)
+@group(1) @binding(0)
 var fft_buffer: texture_2d<f32>;
-@group(0) @binding(1)
+@group(1) @binding(1)
 var fft_sampler: sampler;
 
 const PI = 3.14159265359;
@@ -88,10 +77,7 @@ fn fs_user(in: VertexOutput) -> vec4<f32> {
 		floor(uv.y*SEGS)/SEGS
 	);
 
-	//TODO: This method has gaps. If we have 30 bands and a 256 texture, then we should sample 8 values.
-
-    let tex_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
-	let fft_dimensions = vec2<f32>(textureDimensions(fft_buffer));
+	/* let fft_dimensions = vec2<f32>(textureDimensions(fft_buffer)); */
     let fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(p.x, 0.25)).r;
 
     // led color

@@ -51,3 +51,11 @@ int input_range = input_end - input_start;
 int output_range = output_end - output_start;
 output = (input - input_start)*output_range / input_range + output_start;
 ```
+
+## Shaders
+
+https://www.shadertoy.com/view/ssycDd
+https://www.shadertoy.com/view/ldtBRN
+https://www.shadertoy.com/view/XlVGWh
+https://www.shadertoy.com/view/3dSyRK
+https://www.shadertoy.com/view/Xsj3zy

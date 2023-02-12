@@ -114,7 +114,7 @@ impl RenderPass {
     ) -> Self {
         let shader = wgpu::ShaderModuleDescriptor {
             label: Some("egui_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("egui.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("egui_shader.wgsl"))),
         };
         let module = device.create_shader_module(shader);
 

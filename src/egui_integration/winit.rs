@@ -343,7 +343,7 @@ impl Platform {
 
     /// Returns `true` if egui should handle the event exclusively. Check this to
     /// avoid unexpected interactions, e.g. a mouse click registering "behind" the UI.
-    pub fn captures_event<T>(&self, winit_event: &Event<T>) -> bool {
+    pub fn _captures_event<T>(&self, winit_event: &Event<T>) -> bool {
         match winit_event {
             Event::WindowEvent {
                 window_id: _window_id,
@@ -411,7 +411,7 @@ impl Platform {
 
     /// Returns a mutable reference to the raw input that will be passed to egui
     /// the next time [`Self::begin_frame`] is called
-    pub fn raw_input_mut(&mut self) -> &mut egui::RawInput {
+    pub fn _raw_input_mut(&mut self) -> &mut egui::RawInput {
         &mut self.raw_input
     }
 }
