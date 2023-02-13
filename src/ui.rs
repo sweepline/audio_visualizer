@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
 use wgpu::{CommandEncoder, Device, TextureFormat, TextureView};
@@ -5,12 +6,14 @@ use winit::{event::*, window::Window};
 
 use crate::egui_integration::wgpu::{RenderPass, ScreenDescriptor};
 use crate::egui_integration::winit::{Platform, PlatformDescriptor};
+use crate::shaders;
 
 pub struct UiState {
     platform: Platform,
     egui_rp: RenderPass,
     visible: bool,
     pressed_last_frame: bool,
+    shaders: Vec<PathBuf>,
 }
 
 impl UiState {
@@ -52,6 +55,7 @@ impl UiState {
             egui_rp: render_pass,
             visible: false,
             pressed_last_frame: false,
+            shaders: shaders::list_shaders().unwrap_or(vec![]),
         }
     }
 
@@ -119,13 +123,15 @@ impl UiState {
             ..Default::default()
         };
         egui::SidePanel::left("debug_panel")
-            .resizable(false)
+            .default_width(300.0)
             .frame(egui::Frame::side_top_panel(&style))
             .show(&ctx, |ui| {
                 ui.label("egui");
                 ui.add_space(12.0);
                 ui.separator();
-                ui.label("Immediate mode");
+                for p in &self.shaders {
+                    ui.label(p.display().to_string());
+                }
             });
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.

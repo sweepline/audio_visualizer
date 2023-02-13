@@ -6,7 +6,6 @@ use cpal::{
 use ringbuf::{Consumer, StaticRb};
 use rustfft::{num_complex::Complex32, FftPlanner};
 use std::{
-    io::Write,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -20,18 +19,20 @@ use winit::{
 // mod camera;
 mod egui_integration;
 mod fft_buffer;
+mod shaders;
 mod state;
 // mod texture;
 mod ui;
 
 // Should be 2^n.
-pub const FFT_SIZE: usize = 2048;
+pub const FFT_SIZE: usize = 1024;
 // 1/4 size of FFT_SIZE for 0-10kHz assuming a 44.1kHz Source.
 // Width must be less than or equal to FFT_SIZE
 pub const TEXTURE_WIDTH: usize = FFT_SIZE / 4;
 pub const TEXTURE_HEIGHT: usize = 2;
 pub const TEXTURE_SIZE: usize = TEXTURE_WIDTH * TEXTURE_HEIGHT;
-pub const SMOOTHING: f32 = 0.7;
+// Smoothing for the visuals should be applied per time and not based on FFT SIZE
+pub const SMOOTHING: f32 = 0.8;
 pub const RING_SIZE: usize = FFT_SIZE * 4;
 
 pub type TextureHandle = Arc<Mutex<[f32; TEXTURE_SIZE]>>;

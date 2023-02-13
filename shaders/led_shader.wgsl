@@ -38,39 +38,19 @@ var fft_buffer: texture_2d<f32>;
 @group(1) @binding(1)
 var fft_sampler: sampler;
 
-const PI = 3.14159265359;
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+	// Texture coords have 0,0 in top left and 1,1 in bottom right
+	// UV has 0,0 in bottom left and 1,1 in top right
+
+    let uv = vec2<f32>(in.tex_coords.x, 1.0 - in.tex_coords.y);
+	return fs_user(uv);
+}
 
 const BANDS = 50.0;
 const SEGS = 50.0;
 
-fn linear_to_srgb(linearRGB: vec4<f32>) -> vec4<f32> {
-	let cutoff = vec4<f32>(linearRGB < vec4(0.0031308));
-	let higher = vec4<f32>(1.055) * pow(linearRGB, vec4(1.0 / 2.4)) - vec4(0.055);
-	let lower = linearRGB * vec4(12.92);
-
-	return mix(higher, lower, cutoff);
-}
-
-fn srgb_to_linear(sRGB: vec4<f32>) -> vec4<f32> {
-	let cutoff = vec4<f32>(sRGB < vec4(0.04045));
-	let higher = pow((sRGB + vec4(0.055)) / vec4(1.055), vec4(2.4));
-	let lower = sRGB / vec4(12.92);
-
-	return mix(higher, lower, cutoff);
-}
-
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-	let srgb = fs_user(in);
-	return srgb;
-	/* return srgb_to_linear(srgb); */
-}
-
-fn fs_user(in: VertexOutput) -> vec4<f32> {
-	// Texture coords have 0,0 in top left and 1,1 in bottom right
-	// UV has 0,0 in bottom left and 1,1 in top right
-    let uv = vec2<f32>(in.tex_coords.x, 1.0 - in.tex_coords.y);
-
+fn fs_user(uv: vec2<f32>) -> vec4<f32> {
    // quantize coordinates
 	var p = vec2<f32>(
 		floor(uv.x*BANDS)/BANDS,

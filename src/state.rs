@@ -1,10 +1,11 @@
 use std::{num::NonZeroU32, time::Instant};
 
-use std::iter;
+use std::{fs, iter, path};
 
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
+use crate::shaders::{self, Vertex, INDICES, VERTICES};
 use crate::{fft_buffer, ui::UiState, TextureHandle};
 
 #[repr(C)]
@@ -15,58 +16,6 @@ pub struct UtilUniform {
     pub res_width: f32,
     pub res_height: f32,
 }
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex {
-    position: glam::Vec3,
-    tex_coords: glam::Vec2,
-}
-
-impl Vertex {
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        use std::mem;
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // Position
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                // Texture coordinates
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-pub const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: glam::vec3(-1.0, 1.0, 0.0),
-        tex_coords: glam::vec2(0.0, 0.0),
-    }, // Top Left
-    Vertex {
-        position: glam::vec3(1.0, 1.0, 0.0),
-        tex_coords: glam::vec2(1.0, 0.0),
-    }, // Top Right
-    Vertex {
-        position: glam::vec3(-1.0, -1.0, 0.0),
-        tex_coords: glam::vec2(0.0, 1.0),
-    }, // Bot Left
-    Vertex {
-        position: glam::vec3(1.0, -1.0, 0.0),
-        tex_coords: glam::vec2(1.0, 1.0),
-    }, // Bot Right
-];
-
-pub const INDICES: &[u16] = &[0, 2, 1, 1, 2, 3];
 
 pub struct State {
     pub surface: wgpu::Surface,
@@ -79,6 +28,8 @@ pub struct State {
     util_buffer: wgpu::Buffer,
     util_bind_group: wgpu::BindGroup,
 
+    selected_shader_i: usize,
+    render_pipeline_layout: wgpu::PipelineLayout,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -137,7 +88,6 @@ impl State {
             .filter(|f| !f.describe().srgb)
             .next()
             .unwrap_or(surface_caps.formats[0]);
-        println!("SURFACE TextureFormat: {:?}", surface_format);
 
         let config = wgpu::SurfaceConfiguration {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
@@ -228,7 +178,9 @@ impl State {
             label: Some("util_bind_group"),
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("led_shader.wgsl"));
+        let shaders =
+            crate::shaders::list_shaders().expect("Some shaders available at initial load");
+        let shader_src = &shaders[0];
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -237,46 +189,12 @@ impl State {
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[Vertex::desc()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLAMPING
-                unclipped_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        let render_pipeline = shaders::make_pipeline(
+            &device,
+            &render_pipeline_layout,
+            surface_format,
+            &shader_src,
+        );
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -298,6 +216,8 @@ impl State {
             queue,
             config,
             size,
+            selected_shader_i: 0,
+            render_pipeline_layout,
             render_pipeline,
             vertex_buffer,
             index_buffer,
@@ -322,7 +242,41 @@ impl State {
 
     #[allow(unused_variables)]
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        self.ui.input(event)
+        if self.ui.input(event) {
+            return true;
+        }
+        match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(keycode),
+                        ..
+                    },
+                ..
+            } => {
+                let is_pressed = *state == ElementState::Pressed;
+                match keycode {
+                    VirtualKeyCode::F2 => {
+                        if is_pressed {
+                            let shaders = crate::shaders::list_shaders().unwrap();
+                            let i = (self.selected_shader_i + 1) % shaders.len();
+                            let new_shader = &shaders[i];
+                            self.render_pipeline = crate::shaders::make_pipeline(
+                                &self.device,
+                                &self.render_pipeline_layout,
+                                self.config.format,
+                                &new_shader,
+                            );
+                            self.selected_shader_i = i;
+                        }
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     fn get_elapsed_time(&self) -> f32 {

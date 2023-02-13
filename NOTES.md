@@ -4,13 +4,17 @@
 
 - Sound wave texture
 - Beat detection + texture
+  - https://mziccard.me/2015/05/28/beats-detection-algorithms-1
 - Make all 3 textures (freq, wave, beat) Width x 10 or more textures and include previous steps.
 - Immediate mode UI
   - Debug UI
 - Change parameters at runtime.
 - Start/stop control.
 - Selecting different shaders in UI at runtime
-- Transition between shaders
+  - Seems pretty fast to just drop the old ones and recompile them, but be aware of it.
+  - Gracefully handle compilation errors.
+- Build the preface into the shader so you only have to write the fs_user function. (Adding consts and functions outside should be available).
+- Transition between shaders (have the main fragment control alpha and blend them).
 - Maybe allow webasm code to control phases before shader.
 
 ## Seperate rendering
@@ -26,15 +30,7 @@ Maybe use a rendering library for an easier time? (probably not).
 
 Maybe use storage buffers or dynamic uniforms for fft data, as the data should be pretty small.
 
-```rust
-FFTData {
-	amp_lim: vec2<f32>,
-	bands: usize,
-	data: vec<f32>
-}
-```
-
-something something...
+FFT_SIZE x timesteps textures work pretty well..
 
 ## Blending
 
