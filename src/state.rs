@@ -5,6 +5,7 @@ use std::{fs, iter, path};
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
+use crate::fft_buffer::FFTDimensions;
 use crate::shaders::{self, Vertex, INDICES, VERTICES};
 use crate::{fft_buffer, ui::UiState, TextureHandle};
 
@@ -42,7 +43,7 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(window: &Window) -> Self {
+    pub async fn new(window: &Window, fft_dim: FFTDimensions) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -100,7 +101,8 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let fft_buffer = fft_buffer::FFTBuffer::from_buffer(&device, &queue, "fft_buffer").unwrap();
+        let fft_buffer =
+            fft_buffer::FFTBuffer::from_buffer(&device, &queue, "fft_buffer", fft_dim).unwrap();
 
         let fft_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

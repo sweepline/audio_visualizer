@@ -47,18 +47,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	return fs_user(uv);
 }
 
+fn fft_sample(uvx: f32, time_step: i32) -> f32 {
+	let time_steps = f32(textureDimensions(fft_buffer).y);
+	let line = f32(time_step) / time_steps + 1.0 / time_steps / 2.0;
+
+    let fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(uvx, line)).r;
+	return fft_sample;
+}
+
 const BANDS = 50.0;
 const SEGS = 50.0;
 
 fn fs_user(uv: vec2<f32>) -> vec4<f32> {
    // quantize coordinates
-	var p = vec2<f32>(
+	let p = vec2<f32>(
 		floor(uv.x*BANDS)/BANDS,
 		floor(uv.y*SEGS)/SEGS
 	);
 
-	/* let fft_dimensions = vec2<f32>(textureDimensions(fft_buffer)); */
-    let fft_sample = textureSample(fft_buffer, fft_sampler, vec2<f32>(p.x, 0.25)).r;
+	// textureDimensions gives actual dimensions (512x10) for example
+	// But sampling is done in [0;1].
+	let dim = textureDimensions(fft_buffer);
+    let fft_sample: f32 = fft_sample(p.x, 0);
 
     // led color
     let color = mix(vec3<f32>(0.0, 2.0, 0.0), vec3<f32>(2.0, 0.0, 0.0), sqrt(uv.y));
