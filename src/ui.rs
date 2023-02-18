@@ -1,14 +1,15 @@
 use std::path::PathBuf;
-use std::time::Instant;
 
-use wgpu::{CommandEncoder, Device, TextureFormat, TextureView};
+use wgpu::{CommandEncoder, TextureView};
 use winit::{event::*, window::Window};
 
 use crate::egui_integration::wgpu::{RenderPass, ScreenDescriptor};
 use crate::egui_integration::winit::{Platform, PlatformDescriptor};
+use crate::renderer::Renderer;
 use crate::shaders;
+use crate::state::State;
 
-pub struct UiState {
+pub struct Ui {
     platform: Platform,
     egui_rp: RenderPass,
     visible: bool,
@@ -16,14 +17,14 @@ pub struct UiState {
     shaders: Vec<PathBuf>,
 }
 
-impl UiState {
-    pub fn new(window: &Window, device: &Device, surface_format: TextureFormat) -> Self {
-        let size = window.inner_size();
+impl Ui {
+    pub fn new(state: &State, renderer: &Renderer) -> Self {
+        let size = state.window.inner_size();
 
         let platform = Platform::new(PlatformDescriptor {
             physical_width: size.width as u32,
             physical_height: size.height as u32,
-            scale_factor: window.scale_factor(),
+            scale_factor: state.window.scale_factor(),
             font_definitions: egui::FontDefinitions::default(),
             style: Default::default(),
         });
@@ -48,7 +49,7 @@ impl UiState {
         }
 
         // We use the egui_wgpu_backend crate as the render backend.
-        let render_pass = RenderPass::new(&device, surface_format, 1);
+        let render_pass = RenderPass::new(&renderer.device, renderer.surface_config.format, 1);
 
         Self {
             platform,
@@ -59,7 +60,7 @@ impl UiState {
         }
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    pub fn input(&mut self, event: &WindowEvent, state: &mut State) -> bool {
         match event {
             WindowEvent::KeyboardInput {
                 input:
@@ -86,24 +87,15 @@ impl UiState {
         }
     }
 
-    pub fn update(&mut self, time: &Instant) {
-        self.platform.update_time(time.elapsed().as_secs_f64());
-    }
+    pub fn update(&mut self, state: &State, renderer: &mut Renderer) {
+        let time = state.get_elapsed_time();
+        self.platform.update_time(time.as_secs_f64());
 
-    pub fn render(
-        &mut self,
-        encoder: &mut CommandEncoder,
-        view: &TextureView,
-        window: &Window,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        config: &wgpu::SurfaceConfiguration,
-    ) -> Result<(), wgpu::SurfaceError> {
         if !self.visible {
             // Returning at this point pauses animations,
             // so if you want to have them continue in the background you have to
             // do something about letting the ui render but not take input.
-            return Ok(());
+            return;
         }
 
         // Begin to draw the UI frame.
@@ -130,9 +122,33 @@ impl UiState {
                 ui.add_space(12.0);
                 ui.separator();
                 for p in &self.shaders {
-                    ui.label(p.display().to_string());
+                    if ui.link(p.file_name().unwrap().to_str().unwrap()).clicked() {
+                        renderer.change_shader(p);
+                    }
                 }
+                ui.separator();
+                ui.label(format!("FPS: {}", state.delayed_fps));
             });
+    }
+
+    /// Rendering the UI, update MUST be called before this every frame.
+    pub fn render(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        view: &TextureView,
+        window: &Window,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> Result<(), wgpu::SurfaceError> {
+        if !self.visible {
+            // Returning at this point pauses animations,
+            // so if you want to have them continue in the background you have to
+            // do something about letting the ui render but not take input.
+            return Ok(());
+        }
+
+        // Update must have been called by this point as it starts the frame.
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.
         let full_output = self.platform.end_frame(Some(&window));

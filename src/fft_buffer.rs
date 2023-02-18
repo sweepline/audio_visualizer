@@ -64,7 +64,7 @@ impl FFTBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         label: &str,
-        fft_dimensions: FFTDimensions,
+        fft_dimensions: &FFTDimensions,
     ) -> Result<Self> {
         let size = wgpu::Extent3d {
             width: fft_dimensions.texture_width(),

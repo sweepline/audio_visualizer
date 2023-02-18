@@ -1,16 +1,21 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    ffi::OsStr,
+    fs::{self, FileType},
+    io,
+    path::PathBuf,
+};
 
 pub fn list_shaders() -> Result<Vec<PathBuf>, io::Error> {
-    // let desc = wgpu::ShaderModuleDescriptor {
-    //     label: Some("led_shader.wgsl"),
-    //     source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/led_shader.wgsl").into()),
-    // };
     let paths = fs::read_dir("./shaders")?;
 
     let mut files: Vec<PathBuf> = vec![];
     for path in paths {
-        let p = path?.path();
-        files.push(p);
+        let p = path?;
+        const ACCEPTED: &str = "wgsl";
+        if p.path().extension() != Some(OsStr::new(ACCEPTED)) {
+            continue;
+        }
+        files.push(p.path());
     }
     Ok(files)
 }

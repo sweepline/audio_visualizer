@@ -1,4 +1,4 @@
-use crate::{fft_buffer::FFTDimensions, TextureHandle};
+use crate::{fft_buffer::FFTDimensions, state::State, TextureHandle};
 use core::f32::consts::PI;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -26,7 +26,8 @@ pub struct AudioProcessor {
 }
 
 impl AudioProcessor {
-    pub fn new(dimensions: FFTDimensions) -> Self {
+    pub fn new(state: &State) -> Self {
+        let dimensions = state.fft_dimensions;
         // Setup CPAL for recording
         let host = cpal::default_host();
         let device = host.default_input_device().unwrap();
@@ -103,6 +104,10 @@ impl AudioProcessor {
 
     pub fn fft_texture(&self) -> TextureHandle {
         self.fft_texture.clone()
+    }
+
+    pub fn update(&mut self, state: &State) {
+        // Do something about the fft_texture.
     }
 }
 

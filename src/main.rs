@@ -1,29 +1,18 @@
-use core::f32::consts::PI;
-use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-    BufferSize, SupportedBufferSize,
-};
-use fft_buffer::FFTDimensions;
-use ringbuf::{Consumer, StaticRb};
-use rustfft::{num_complex::Complex32, FftPlanner};
 use std::{
     sync::{Arc, Mutex},
-    thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
 };
 
-// mod camera;
 mod audio_processor;
 mod egui_integration;
 mod fft_buffer;
+mod renderer;
 mod shaders;
 mod state;
-// mod texture;
 mod ui;
 
 pub type TextureHandle = Arc<Mutex<Vec<f32>>>;
@@ -32,34 +21,27 @@ pub type TextureHandle = Arc<Mutex<Vec<f32>>>;
 async fn main() {
     env_logger::init();
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_transparent(true)
-        .build(&event_loop)
-        .unwrap();
 
-    let fft_dim = FFTDimensions::default();
-
-    let audio_processor = audio_processor::AudioProcessor::new(fft_dim);
-    let mut state = state::State::new(&window, fft_dim).await;
-
-    let mut timer = Instant::now();
+    let mut state = state::State::new(&event_loop);
+    let audio_processor = audio_processor::AudioProcessor::new(&state);
+    let mut renderer = renderer::Renderer::new(&state).await;
+    let mut ui = ui::Ui::new(&state, &renderer);
 
     // END FFT.
     event_loop.run(move |event, _, control_flow| {
-        state.ui.handle_event(&event);
+        ui.handle_event(&event);
         *control_flow = ControlFlow::Poll;
         match event {
             Event::MainEventsCleared => {
-                let fps = 1_000_000 / timer.elapsed().as_micros();
-                let mul = 2; // Make fps a multiple of mul;
-                let fps = ((fps + mul - 1) / mul) * mul;
-                timer = Instant::now();
+                ui.update(&state, &mut renderer);
+                renderer.update(&audio_processor, &mut state);
+                //audio_processor.update().... needs to update thread.
+                state.update();
 
-                state.update(audio_processor.fft_texture());
-                match state.render(&window) {
+                match renderer.render(&state, &mut ui) {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
@@ -69,16 +51,17 @@ async fn main() {
             Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == window.id() => {
-                if !state.input(event) {
+            } if window_id == state.window.id() => {
+                // If input didnt capture the keybind, do this.
+                if !ui.input(event, &mut state) {
                     match event {
                         WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                         WindowEvent::Resized(physical_size) => {
-                            state.resize(*physical_size);
+                            renderer.resize(*physical_size);
                         }
                         WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                             // new_inner_size is &mut so w have to dereference it twice
-                            state.resize(**new_inner_size);
+                            renderer.resize(**new_inner_size);
                         }
                         _ => {}
                     }
