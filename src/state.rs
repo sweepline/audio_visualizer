@@ -11,6 +11,8 @@ pub struct State {
     pub fft_dimensions: FFTDimensions,
     time: Instant,
     frame_timer: Instant,
+
+    // FPS Meter
     fps_timer: Instant,
     pub delayed_fps: u64,
 }
@@ -41,8 +43,8 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        const FPS_UPDATE_RATE: u128 = 1 * 1_000_000;
-        if self.fps_timer.elapsed().as_micros() > FPS_UPDATE_RATE {
+        const FPS_UPDATE_RATE_US: u128 = 500 * 1_000; // MS * TO_uS
+        if self.fps_timer.elapsed().as_micros() > FPS_UPDATE_RATE_US {
             self.fps_timer = Instant::now();
             self.delayed_fps = self.get_fps();
         }

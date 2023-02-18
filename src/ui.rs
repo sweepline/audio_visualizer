@@ -80,6 +80,13 @@ impl Ui {
                         self.pressed_last_frame = is_pressed;
                         true
                     }
+                    VirtualKeyCode::F2 => {
+                        if is_pressed && !self.pressed_last_frame {
+                            self.visible = !self.visible;
+                        }
+                        self.pressed_last_frame = is_pressed;
+                        true
+                    }
                     _ => false,
                 }
             }

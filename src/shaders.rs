@@ -5,6 +5,8 @@ use std::{
     path::PathBuf,
 };
 
+const PRELUDE: &str = include_str!("shader_prelude.wgsl");
+
 pub fn list_shaders() -> Result<Vec<PathBuf>, io::Error> {
     let paths = fs::read_dir("./shaders")?;
 
@@ -26,7 +28,10 @@ pub fn make_pipeline(
     format: wgpu::TextureFormat,
     shader: &PathBuf,
 ) -> wgpu::RenderPipeline {
-    let shader_src = fs::read_to_string(shader).expect("Should have been able to read the file");
+    let user_src = fs::read_to_string(shader).expect("Should have been able to read the file");
+
+    let shader_src = PRELUDE.to_string() + &user_src;
+
     let desc = wgpu::ShaderModuleDescriptor {
         label: Some(
             shader

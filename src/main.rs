@@ -1,7 +1,3 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
-};
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -15,15 +11,13 @@ mod shaders;
 mod state;
 mod ui;
 
-pub type TextureHandle = Arc<Mutex<Vec<f32>>>;
-
 #[tokio::main]
 async fn main() {
     env_logger::init();
     let event_loop = EventLoop::new();
 
     let mut state = state::State::new(&event_loop);
-    let audio_processor = audio_processor::AudioProcessor::new(&state);
+    let mut audio_processor = audio_processor::AudioProcessor::new(&state);
     let mut renderer = renderer::Renderer::new(&state).await;
     let mut ui = ui::Ui::new(&state, &renderer);
 
@@ -52,6 +46,7 @@ async fn main() {
                 ref event,
                 window_id,
             } if window_id == state.window.id() => {
+                audio_processor.new_analysis_thread();
                 // If input didnt capture the keybind, do this.
                 if !ui.input(event, &mut state) {
                     match event {

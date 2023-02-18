@@ -1,4 +1,4 @@
-use crate::{fft_buffer::FFTDimensions, state::State, TextureHandle};
+use crate::{fft_buffer::FFTDimensions, state::State};
 use core::f32::consts::PI;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -15,14 +15,28 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub type TextureHandle = Arc<Mutex<Vec<f32>>>;
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct FFTStats {
+    max_peak: u32,
+    min_peak: u32,
+    min_freq: u32,
+    max_freq: u32,
+}
+
+#[allow(dead_code)]
 pub struct AudioProcessor {
     // wave_texture: TextureHandle,
     fft_texture: TextureHandle,
     // beat_texture: TextureHandle,
-    fft_thread: JoinHandle<()>,
-    dimensions: FFTDimensions,
+    fft_stats: Arc<Mutex<FFTStats>>,
     input_stream: Stream,
     stream_config: StreamConfig,
+    // This is kept so the thread doesnt become detached
+    fft_thread: JoinHandle<()>,
+    kill_signal: Arc<AtomicBool>,
 }
 
 impl AudioProcessor {
@@ -85,20 +99,33 @@ impl AudioProcessor {
         let input_stream = device
             .build_input_stream(&config, input_data_fn, err_fn, None)
             .unwrap();
+        let _ = input_stream.play();
 
+        let fft_stats = Arc::new(Mutex::new(FFTStats::default()));
+
+        let kill_signal = Arc::new(AtomicBool::from(false));
+
+        let kill_thread = kill_signal.clone();
         // Better performance with Arc<[Atomic]> instead of Arc<Mutex>
         let fft_texture: TextureHandle = Arc::new(Mutex::new(vec![0.; dimensions.texture_size()]));
         let thread_fft_tex = fft_texture.clone();
         let fft_thread = thread::spawn(move || {
-            fft_analysis(consumer, thread_fft_tex, config.sample_rate, dimensions);
+            fft_analysis(
+                consumer,
+                thread_fft_tex,
+                config.sample_rate,
+                dimensions,
+                kill_thread,
+            );
         });
 
         Self {
             fft_texture,
             fft_thread,
             input_stream,
-            dimensions,
             stream_config: config,
+            kill_signal,
+            fft_stats,
         }
     }
 
@@ -109,7 +136,21 @@ impl AudioProcessor {
     pub fn update(&mut self, state: &State) {
         // Do something about the fft_texture.
     }
+
+    // TODO: Pause and start should just completely reconstruct the inputstream and FFT_analysis
+    // and the ring_buffer.
+    pub fn start(&mut self) {}
+    pub fn pause(&mut self) {
+        let _ = self.input_stream.pause();
+        self.kill_signal.store(true, Ordering::SeqCst);
+    }
+    pub fn new_analysis_thread(&mut self) {
+        //dimensions: &FFTDimensions
+        // let res = self.fft_thread.join();
+    }
 }
+
+// Some different windows to preprocessing.
 
 pub fn blackman_single(sample: f32, n: f32, len: f32) -> f32 {
     let a0 = (1. - 0.16) / 2.;
@@ -119,6 +160,7 @@ pub fn blackman_single(sample: f32, n: f32, len: f32) -> f32 {
     sample * w
 }
 
+#[allow(unused)]
 pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
     let samples_len_f32 = samples_len as f32;
     let two_pi_i = 2. * PI * i as f32;
@@ -127,11 +169,14 @@ pub fn hann_single(sample: f32, i: usize, samples_len: usize) -> f32 {
     multiplier * sample
 }
 
+// The main function that analysis the audio data
+
 fn fft_analysis(
     mut consumer: Consumer<f32, Arc<HeapRb<f32>>>,
-    texture_handle: Arc<Mutex<Vec<f32>>>,
+    texture_handle: TextureHandle,
     cpal::SampleRate(sample_rate): cpal::SampleRate,
     dimensions: FFTDimensions,
+    kill_signal: Arc<AtomicBool>,
 ) {
     let fft_size = dimensions.fft_size;
     let sr_ms = sample_rate as f32 / 1_000.;
@@ -221,6 +266,10 @@ fn fft_analysis(
             const EARLY_WAKE_US: u128 = 2000; // Because we want to stop sleeping a little before.
             let remaining = fft_delay_us - timer.elapsed().as_micros() - EARLY_WAKE_US;
             spin_sleep::sleep(Duration::from_micros(remaining as u64));
+            if kill_signal.load(Ordering::SeqCst) {
+                println!("THREAD KILLED");
+                break;
+            }
         }
     }
 }

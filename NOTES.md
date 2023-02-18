@@ -6,6 +6,7 @@
 - Beat detection + texture
   - https://mziccard.me/2015/05/28/beats-detection-algorithms-1
 - Make all 3 textures (freq, wave, beat) Width x 10 or more textures and include previous steps.
+- Multi-level texture test
 - Immediate mode UI
   - Debug UI
 - Change parameters at runtime.
@@ -13,9 +14,11 @@
 - Selecting different shaders in UI at runtime
   - Seems pretty fast to just drop the old ones and recompile them, but be aware of it.
   - Gracefully handle compilation errors.
-- Build the preface into the shader so you only have to write the fs_user function. (Adding consts and functions outside should be available).
+    - This also goes into the fading of shaders, because we can try and compile it and not fade then.
+- Build the preface into the shader compilation so you only have to write the fs_user function. (Adding consts and functions outside should be available).
 - Transition between shaders (have the main fragment control alpha and blend them).
 - Maybe allow webasm code to control phases before shader.
+- Some kind of prelude generation + docs for it.
 
 ## Seperate rendering
 
@@ -48,10 +51,3 @@ int output_range = output_end - output_start;
 output = (input - input_start)*output_range / input_range + output_start;
 ```
 
-## Shaders
-
-https://www.shadertoy.com/view/ssycDd
-https://www.shadertoy.com/view/ldtBRN
-https://www.shadertoy.com/view/XlVGWh
-https://www.shadertoy.com/view/3dSyRK
-https://www.shadertoy.com/view/Xsj3zy

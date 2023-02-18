@@ -45,7 +45,7 @@ impl FFTDimensions {
 
 impl Default for FFTDimensions {
     fn default() -> Self {
-        Self::new(1024, 10, 0.8, 4)
+        Self::new(1024, 100, 0.8, 4)
     }
 }
 
