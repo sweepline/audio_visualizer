@@ -60,6 +60,7 @@ fn fft_sample(uvx: f32, time_step: i32) -> f32 {
 	return fft_sample;
 }
 
+// The users shader will be appended to this file.
 // Expect the user shader to define function
 // `fn fs_user(uv: vec2<f32>) -> vec3<f32>`
 /*     let color = vec3<f32>(1.0, 0.0, 0.0); */

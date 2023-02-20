@@ -4,14 +4,6 @@
 const MULT = 10.0;
 const BLUR_EPS = 0.001;
 
-fn get_val(uv: vec2<f32>,suv: vec2<f32>) -> f32 {
-	var val = (fft_sample(uv.x, 0) +
-				  fft_sample(uv.x - BLUR_EPS, 0) +
-				  fft_sample(uv.x + BLUR_EPS, 0)) * 0.333;
-	val *= smoothstep( 0.0, 1.0, clamp( ( 3.0 - abs( suv.x - 0.5 ) * 8.0 ), 0.0, 1.0 ) ) * 0.8 + 0.1;
-	return val;
-}
-
 fn colorize(uv: vec2<f32>) -> vec3<f32>
 {
 	let FNS = time_steps();

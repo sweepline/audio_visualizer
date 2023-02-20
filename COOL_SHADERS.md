@@ -6,3 +6,5 @@
 - [ ] https://www.shadertoy.com/view/XlVGWh
 - [ ] https://www.shadertoy.com/view/3dSyRK
 - [ ] https://www.shadertoy.com/view/Xsj3zy
+- [ ] https://www.shadertoy.com/view/MlGGDK
+- [ ] https://www.shadertoy.com/view/wtdSzS

@@ -24,6 +24,8 @@ pub struct FFTStats {
     min_peak: u32,
     min_freq: u32,
     max_freq: u32,
+    desync_us: u128,
+    input_feel_behind: u32,
 }
 
 #[allow(dead_code)]
