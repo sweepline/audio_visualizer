@@ -1,4 +1,5 @@
-//https://www.shadertoy.com/view/ll2SRy
+// Based on
+// https://www.shadertoy.com/view/ll2SRy
 
 
 // Cheap vec3<f32> to vec3<f32> hash. Works well enough, but there are other ways.
@@ -46,7 +47,6 @@ fn fs_user(coord: vec2<f32>) -> vec3<f32> {
     let aspect = util.res_width / util.res_height;
     var uv = (coord - 0.5) * vec2<f32>(aspect, 1.);
 
-
     // Unit direction ray. The last term is one of many ways to fish-lens the camera.
     // For a regular view, set "rd.z" to something like "0.5."
 	let fish = (1. - dot(uv, uv)*.5)*.5;
@@ -55,8 +55,8 @@ fn fs_user(coord: vec2<f32>) -> vec3<f32> {
 		fish
 	)); // Fish lens, for that 1337, but tryhardish, demo look. :)
 
-    // There are a few ways to hide artifacts and inconsistencies. Making things go fast is one of them. :)
-    // Ray origin, scene color, and surface postion vector.
+    // there are a few ways to hide artifacts and inconsistencies. making things go fast is one of them. :)
+    // ray origin, scene color, and surface postion vector.
     let ro = vec3<f32>(0., 0., util.time * 3.);
 	var col = vec3<f32>(0.0);
 	var sp = vec3<f32>(0.0);

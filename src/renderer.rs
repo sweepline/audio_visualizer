@@ -15,8 +15,10 @@ use crate::ui::Ui;
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UtilUniform {
     pub time: f32,
+    // Todo make vector
     pub res_width: f32,
     pub res_height: f32,
+    // pub freq_max: f32,
 }
 
 pub struct Renderer {
